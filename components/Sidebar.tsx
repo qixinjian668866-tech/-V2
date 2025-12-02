@@ -2,7 +2,7 @@
 import React, { useRef, useState } from 'react';
 import { StrategyConfig, StrategyType, Stock } from '../types';
 import { STOCK_POOL } from '../constants';
-import { Settings, Save, Search, AlertTriangle, Calendar, Wallet, Upload } from 'lucide-react';
+import { Settings, Save, Search, AlertTriangle, Calendar, Wallet, Upload, Cloud } from 'lucide-react';
 
 interface SidebarProps {
   config: StrategyConfig;
@@ -21,7 +21,7 @@ const StrategyButton: React.FC<{
 }> = ({ label, active, onClick }) => (
   <button
     onClick={onClick}
-    className={`w-full text-left px-4 py-2.5 rounded-md text-sm font-medium transition-all ${
+    className={`w-full text-left px-3 py-3 md:py-2.5 rounded-md text-sm font-medium transition-all ${
       active
         ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/20'
         : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
@@ -40,7 +40,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   onSelectStock,
   onSave
 }) => {
-  const [avatarUrl, setAvatarUrl] = useState("https://api.dicebear.com/9.x/identicon/svg?seed=Fengniao");
+  // Empty string indicates default "Cloud" view; otherwise contains Blob URL for uploaded image
+  const [avatarUrl, setAvatarUrl] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleChange = (key: keyof StrategyConfig, value: number | string) => {
@@ -94,7 +95,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             step={key === 'volumeRatio' || key === 'gridStep' || key === 't0Threshold' || key === 't0TakeProfit' || key === 't0StopLoss' ? 0.1 : 1}
             value={config[key] as number}
             onChange={(e) => handleChange(key, parseFloat(e.target.value))}
-            className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
+            className="w-full h-2 md:h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-primary-500 touch-none"
         />
     </div>
   );
@@ -102,19 +103,26 @@ const Sidebar: React.FC<SidebarProps> = ({
   const isDualMAInvalid = selectedStrategy === 'DualMA' && config.shortPeriod >= config.longPeriod;
 
   return (
-    <div className="w-72 bg-slate-900 border-r border-slate-700 flex flex-col h-full overflow-y-auto">
+    <div className="w-full md:w-72 bg-slate-900 border-r border-slate-700 flex flex-col h-full overflow-y-auto pb-20 md:pb-0">
       {/* Header */}
-      <div className="p-4 border-b border-slate-700 flex items-center gap-3">
+      <div className="p-4 border-b border-slate-700 flex items-center gap-3 sticky top-0 bg-slate-900 z-10">
         <div 
-            className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden cursor-pointer group relative"
+            className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden cursor-pointer group relative shrink-0"
             onClick={handleAvatarClick}
             title="点击上传头像"
         >
-           <img 
-              src={avatarUrl}
-              alt="Logo" 
-              className="w-full h-full object-cover"
-           />
+           {avatarUrl ? (
+               <img 
+                  src={avatarUrl}
+                  alt="Logo" 
+                  className="w-full h-full object-cover"
+               />
+           ) : (
+               <div className="flex items-center justify-center w-full h-full">
+                   <Cloud className="w-6 h-6 text-white" fill="white" />
+               </div>
+           )}
+           
            {/* Overlay on hover */}
            <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                <Upload className="w-4 h-4 text-white" />
@@ -146,7 +154,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     const stock = STOCK_POOL.find(s => s.code === e.target.value);
                     if (stock) onSelectStock(stock);
                 }}
-                className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-primary-500 appearance-none"
+                className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-3 md:py-2 text-sm text-slate-200 focus:outline-none focus:border-primary-500 appearance-none"
             >
                 {filteredStockPool.map(stock => (
                     <option key={stock.code} value={stock.code}>
@@ -154,7 +162,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </option>
                 ))}
             </select>
-            <div className="absolute right-3 top-2.5 pointer-events-none text-slate-500 text-xs">▼</div>
+            <div className="absolute right-3 top-3.5 md:top-2.5 pointer-events-none text-slate-500 text-xs">▼</div>
         </div>
       </div>
 
@@ -192,7 +200,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         step="10000"
                         value={config.initialCapital}
                         onChange={(e) => handleChange('initialCapital', parseFloat(e.target.value) || 0)}
-                        className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-primary-500"
+                        className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2 md:py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-primary-500"
                     />
                 </div>
 
@@ -208,7 +216,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             max="2025-12-01"
                             value={config.startDate}
                             onChange={(e) => handleChange('startDate', e.target.value)}
-                            className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-primary-500"
+                            className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2 md:py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-primary-500"
                         />
                     </div>
                     <div className="space-y-1">
@@ -222,7 +230,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             max="2025-12-01"
                             value={config.endDate}
                             onChange={(e) => handleChange('endDate', e.target.value)}
-                            className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-primary-500"
+                            className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-2 md:py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-primary-500"
                         />
                     </div>
                 </div>
@@ -292,7 +300,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <button 
             onClick={onSave}
             disabled={isDualMAInvalid}
-            className={`w-full px-3 py-2 rounded text-sm flex items-center justify-center gap-1 transition-colors ${
+            className={`w-full px-3 py-3 md:py-2 rounded text-sm flex items-center justify-center gap-1 transition-colors ${
                 isDualMAInvalid 
                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
                 : 'bg-slate-700 hover:bg-slate-600 text-slate-200'

@@ -26,16 +26,16 @@ const MetricCard: React.FC<{ label: string; value: string; color?: string }> = (
   value, 
   color = 'text-white' 
 }) => (
-  <div className="bg-slate-800 p-3 rounded-md border border-slate-700 flex flex-col gap-1">
-    <span className="text-slate-400 text-xs font-medium">{label}</span>
-    <span className={`text-xl font-bold font-mono ${color}`}>{value}</span>
+  <div className="bg-slate-800 p-2 md:p-3 rounded-md border border-slate-700 flex flex-col gap-1">
+    <span className="text-slate-400 text-[10px] md:text-xs font-medium truncate">{label}</span>
+    <span className={`text-base md:text-xl font-bold font-mono ${color}`}>{value}</span>
   </div>
 );
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-slate-800 border border-slate-600 p-2 rounded shadow-xl text-xs">
+      <div className="bg-slate-800 border border-slate-600 p-2 rounded shadow-xl text-xs z-50">
         <p className="text-slate-300 font-bold mb-1">{label}</p>
         {payload.map((entry: any, index: number) => (
             <p key={index} style={{ color: entry.color }}>
@@ -57,9 +57,9 @@ const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics 
   const [chartMode, setChartMode] = useState<'price' | 'equity'>('price');
 
   return (
-    <div className="w-96 bg-slate-900 border-l border-slate-700 flex flex-col h-full overflow-y-auto">
+    <div className="w-full md:w-96 bg-slate-900 border-l border-slate-700 flex flex-col h-full overflow-y-auto pb-20 md:pb-0">
       {/* Header */}
-      <div className="p-4 border-b border-slate-700 flex items-center gap-2">
+      <div className="p-4 border-b border-slate-700 flex items-center gap-2 sticky top-0 bg-slate-900 z-10">
         <BarChart2 className="w-4 h-4 text-slate-400" />
         <span className="text-slate-200 font-semibold text-sm">回测结果</span>
       </div>
@@ -67,6 +67,7 @@ const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics 
       {/* Metrics Grid */}
       <div className="p-4">
         <h3 className="text-slate-500 text-xs font-medium mb-3">核心指标</h3>
+        {/* Adjusted grid for better mobile fit */}
         <div className="grid grid-cols-3 gap-2 mb-2">
           <MetricCard label="总收益率" value={metrics.totalReturn} color="text-red-500" />
           <MetricCard label="年化收益" value={metrics.annualReturn} color="text-red-500" />
@@ -80,25 +81,25 @@ const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics 
       </div>
 
       {/* Chart Section */}
-      <div className="flex-1 min-h-[300px] border-t border-slate-700 bg-slate-850 p-4">
+      <div className="flex-1 min-h-[350px] md:min-h-[300px] border-t border-slate-700 bg-slate-850 p-4 flex flex-col">
         <div className="flex items-center justify-between mb-4">
             <div className="flex bg-slate-800 rounded p-0.5">
                 <button 
                     onClick={() => setChartMode('price')}
-                    className={`px-3 py-1 text-xs rounded shadow-sm transition-colors ${chartMode === 'price' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                    className={`px-3 py-1.5 md:py-1 text-xs rounded shadow-sm transition-colors ${chartMode === 'price' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}
                 >
                     K线图 (D1)
                 </button>
                 <button 
                     onClick={() => setChartMode('equity')}
-                    className={`px-3 py-1 text-xs rounded shadow-sm transition-colors ${chartMode === 'equity' ? 'bg-purple-900/50 text-purple-200' : 'text-slate-400 hover:text-slate-200'}`}
+                    className={`px-3 py-1.5 md:py-1 text-xs rounded shadow-sm transition-colors ${chartMode === 'equity' ? 'bg-purple-900/50 text-purple-200' : 'text-slate-400 hover:text-slate-200'}`}
                 >
                     账户净值
                 </button>
             </div>
         </div>
         
-        <div className="h-48 w-full">
+        <div className="flex-1 w-full min-h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
                 {chartMode === 'price' ? (
                     <ComposedChart data={chartData}>
@@ -151,7 +152,7 @@ const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics 
       </div>
 
       {/* Trades List */}
-      <div className="border-t border-slate-700 bg-slate-900 flex-1 flex flex-col">
+      <div className="border-t border-slate-700 bg-slate-900 flex-1 flex flex-col min-h-[200px]">
         <div className="px-4 py-3 border-b border-slate-800">
             <h3 className="text-slate-500 text-xs font-medium">最新交易</h3>
         </div>

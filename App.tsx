@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import EditorPanel from './components/EditorPanel';
 import ResultsPanel from './components/ResultsPanel';
@@ -15,6 +15,7 @@ import {
     generateDeterministicMetrics
 } from './constants';
 import { analyzeStrategy } from './services/geminiService';
+import { Settings, Code, BarChart2 } from 'lucide-react';
 
 const App: React.FC = () => {
   // State Management
@@ -45,6 +46,9 @@ const App: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [metrics, setMetrics] = useState<Metrics>(DEFAULT_METRICS);
   const [hasAiBoost, setHasAiBoost] = useState(false);
+  
+  // Mobile Tab State
+  const [activeTab, setActiveTab] = useState<'config' | 'editor' | 'results'>('config');
 
   // Initialize Logs
   useEffect(() => {
@@ -122,14 +126,11 @@ const App: React.FC = () => {
         replaceParam('threshold', newConfig.limitUpThreshold);
     }
 
-    // Try to update Initial Capital comment if exists, or append it to sync visually
-    // Note: Backtrader usually sets cash in cerebro.broker.setcash() outside strategy class
-    // We will just update a comment at the top for visual consistency
+    // Try to update Initial Capital comment
     const capitalCommentRegex = /# Initial Capital: \d+/;
     if (capitalCommentRegex.test(newCode)) {
         newCode = newCode.replace(capitalCommentRegex, `# Initial Capital: ${newConfig.initialCapital}`);
     } else {
-        // Insert at the top
         const lines = newCode.split('\n');
         if (lines[0].includes('strategy.py')) {
              lines.splice(1, 0, `\n# Initial Capital: ${newConfig.initialCapital}`);
@@ -186,7 +187,6 @@ const App: React.FC = () => {
           }
       }
       
-      // Parse capital comment
       const capitalMatch = currentCode.match(/# Initial Capital: (\d+)/);
       if (capitalMatch) {
           const cap = parseInt(capitalMatch[1]);
@@ -210,7 +210,6 @@ const App: React.FC = () => {
   };
 
   const handleSaveConfig = () => {
-      // Logic check for save as well
       if (selectedStrategy === 'DualMA' && config.shortPeriod >= config.longPeriod) {
            setLogs(prev => [...prev, { time: new Date().toLocaleTimeString('en-GB'), level: LogLevel.ERROR, message: `[错误] 保存失败：短期均线必须小于长期均线！` }]);
            return;
@@ -230,7 +229,6 @@ const App: React.FC = () => {
   const handleStrategySelect = (type: StrategyType) => {
     setSelectedStrategy(type);
     
-    // Inject initial capital comment into the raw template code when switching
     let newCode = STRATEGY_CODES[type];
     const lines = newCode.split('\n');
     if (lines[0].includes('strategy.py')) {
@@ -239,7 +237,6 @@ const App: React.FC = () => {
     }
     setCode(newCode);
     
-    // Auto-select logic
     let newStock = selectedStock;
     if (type === 'SmallCap') {
         const csi300 = STOCK_POOL.find(s => s.code === 'CSI_300');
@@ -295,6 +292,11 @@ const App: React.FC = () => {
   const handleRunBacktest = () => {
     if (!validateBacktest()) return;
 
+    // Switch to Results tab on mobile automatically when running
+    if (window.innerWidth < 768) {
+        setActiveTab('results');
+    }
+
     setLogs(prev => [
         ...prev, 
         { time: new Date().toLocaleTimeString('en-GB'), level: LogLevel.WARN, message: `[系统] 正在回测 ${selectedStock.name} (Capital: ${config.initialCapital})...` },
@@ -329,29 +331,69 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-full bg-slate-950 text-slate-200 overflow-hidden font-sans">
-      <Sidebar 
-        config={config} 
-        onConfigChange={handleConfigChange} 
-        selectedStrategy={selectedStrategy}
-        onSelectStrategy={handleStrategySelect}
-        selectedStock={selectedStock}
-        onSelectStock={handleStockChange}
-        onSave={handleSaveConfig}
-      />
-      <EditorPanel 
-        code={code} 
-        onCodeChange={handleCodeChange} 
-        logs={logs}
-        onRun={handleRunBacktest}
-        onAnalyze={handleAiAnalyze}
-        isAnalyzing={isAnalyzing}
-      />
-      <ResultsPanel 
-        chartData={generateChartData(config.initialCapital)}
-        trades={MOCK_TRADES}
-        metrics={metrics}
-      />
+    <div className="flex flex-col md:flex-row h-screen w-full bg-slate-950 text-slate-200 overflow-hidden font-sans">
+      {/* Mobile Tab Content Wrapper */}
+      <div className={`flex-1 md:flex flex-col md:flex-row h-[calc(100vh-60px)] md:h-screen w-full`}>
+          
+          {/* Sidebar */}
+          <div className={`${activeTab === 'config' ? 'block' : 'hidden md:block'} w-full md:w-auto h-full`}>
+              <Sidebar 
+                config={config} 
+                onConfigChange={handleConfigChange} 
+                selectedStrategy={selectedStrategy}
+                onSelectStrategy={handleStrategySelect}
+                selectedStock={selectedStock}
+                onSelectStock={handleStockChange}
+                onSave={handleSaveConfig}
+              />
+          </div>
+
+          {/* Editor */}
+          <div className={`${activeTab === 'editor' ? 'flex' : 'hidden md:flex'} flex-1 w-full h-full`}>
+              <EditorPanel 
+                code={code} 
+                onCodeChange={handleCodeChange} 
+                logs={logs}
+                onRun={handleRunBacktest}
+                onAnalyze={handleAiAnalyze}
+                isAnalyzing={isAnalyzing}
+              />
+          </div>
+
+          {/* Results */}
+          <div className={`${activeTab === 'results' ? 'block' : 'hidden md:block'} w-full md:w-auto h-full`}>
+              <ResultsPanel 
+                chartData={generateChartData(config.initialCapital)}
+                trades={MOCK_TRADES}
+                metrics={metrics}
+              />
+          </div>
+      </div>
+
+      {/* Mobile Bottom Navigation */}
+      <div className="md:hidden fixed bottom-0 left-0 w-full h-[60px] bg-slate-900 border-t border-slate-800 flex justify-around items-center z-50">
+          <button 
+            onClick={() => setActiveTab('config')}
+            className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'config' ? 'text-primary-500' : 'text-slate-500'}`}
+          >
+              <Settings className="w-5 h-5" />
+              <span className="text-[10px]">配置</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('editor')}
+            className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'editor' ? 'text-primary-500' : 'text-slate-500'}`}
+          >
+              <Code className="w-5 h-5" />
+              <span className="text-[10px]">代码</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('results')}
+            className={`flex flex-col items-center gap-1 p-2 ${activeTab === 'results' ? 'text-primary-500' : 'text-slate-500'}`}
+          >
+              <BarChart2 className="w-5 h-5" />
+              <span className="text-[10px]">结果</span>
+          </button>
+      </div>
     </div>
   );
 };
