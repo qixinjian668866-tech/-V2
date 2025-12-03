@@ -48,9 +48,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         {dataPoint.signal && (
             <div className={`mb-1 font-bold ${dataPoint.signal === 'buy' ? 'text-red-500' : 'text-green-500'}`}>
                 {dataPoint.signal === 'buy' ? '操作: 买入' : '操作: 卖出'}
-                <span className="ml-2 text-slate-300">
-                    价: {dataPoint.price.toFixed(2)}
-                </span>
+                {/* Price removed as requested */}
                 {dataPoint.pl !== undefined && (
                     <span className="ml-2">
                         (盈亏: {dataPoint.pl > 0 ? '+' : ''}{dataPoint.pl.toFixed(0)})
@@ -60,7 +58,8 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         )}
         {filteredPayload.map((entry: any, index: number) => (
             <p key={index} style={{ color: entry.color, fontWeight: 'bold' }}>
-                {entry.name}: {typeof entry.value === 'number' ? entry.value.toFixed(2) : entry.value}
+                {/* Only show Name, remove Value as requested */}
+                {entry.name}
             </p>
         ))}
       </div>
