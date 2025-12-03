@@ -63,8 +63,8 @@ export interface Metric {
 }
 
 export interface Metrics {
-  totalReturn: string;
   annualReturn: string;
+  benchmarkReturn: string;
   sharpeRatio: string;
   maxDrawdown: string;
   winRate: string;

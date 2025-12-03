@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { 
   ResponsiveContainer, 
@@ -172,8 +173,8 @@ const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics 
         <h3 className="text-slate-500 text-xs font-medium mb-3">核心指标</h3>
         {/* Adjusted grid for better mobile fit */}
         <div className="grid grid-cols-3 gap-2 mb-2">
-          <MetricCard label="总收益率" value={metrics.totalReturn} color="text-red-500" />
           <MetricCard label="年化收益" value={metrics.annualReturn} color="text-red-500" />
+          <MetricCard label="基准年化收益" value={metrics.benchmarkReturn} color="text-red-500" />
           <MetricCard label="夏普比率" value={metrics.sharpeRatio} />
         </div>
         <div className="grid grid-cols-3 gap-2">

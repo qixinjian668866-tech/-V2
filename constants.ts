@@ -1,4 +1,5 @@
 
+
 import { ChartDataPoint, LogEntry, LogLevel, Trade, Metrics, StrategyType, Stock, StrategyConfig } from "./types";
 
 export const STOCK_POOL: Stock[] = [
@@ -42,6 +43,7 @@ export const generateDeterministicMetrics = (
 
     const ret = getVal(1, 5, 55);
     const dd = getVal(2, 6, 15);
+    const benchmark = getVal(6, 8, 12); // Range 8% - 12%
     
     const sharpe = (ret / 20) + getVal(3, 0, 0.5); 
     const winRate = 45 + (ret * 0.4) + getVal(4, 0, 10);
@@ -50,8 +52,8 @@ export const generateDeterministicMetrics = (
     const tradeCount = Math.floor(getVal(5, 30, 120));
 
     return {
-        totalReturn: `${ret.toFixed(2)}%`,
         annualReturn: `${ret.toFixed(2)}%`,
+        benchmarkReturn: `${benchmark.toFixed(2)}%`,
         sharpeRatio: sharpe.toFixed(2),
         maxDrawdown: `${dd.toFixed(2)}%`,
         winRate: `${finalWinRate.toFixed(1)}%`,
@@ -60,8 +62,8 @@ export const generateDeterministicMetrics = (
 };
 
 export const DEFAULT_METRICS: Metrics = {
-    totalReturn: "25.50%",
     annualReturn: "25.50%",
+    benchmarkReturn: "10.50%",
     sharpeRatio: "1.20",
     maxDrawdown: "7.00%",
     winRate: "62.0%",

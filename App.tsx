@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import EditorPanel from './components/EditorPanel';
@@ -40,6 +41,10 @@ const App: React.FC = () => {
     };
   });
 
+  // Executed Config holds the state used for the LAST backtest run.
+  // This decouples the slider movements (live `config`) from the results (`executedConfig`).
+  const [executedConfig, setExecutedConfig] = useState<StrategyConfig>(config);
+
   const [selectedStock, setSelectedStock] = useState<Stock>(STOCK_POOL[0]);
   const [selectedStrategy, setSelectedStrategy] = useState<StrategyType>('DualMA');
   const [code, setCode] = useState<string>(INITIAL_PYTHON_CODE);
@@ -59,6 +64,45 @@ const App: React.FC = () => {
       setTrades(newTrades);
   };
 
+  // Helper to parse config from code string without relying on component state for strategy
+  const parseConfigFromStrategyCode = (codeStr: string, currentConfig: StrategyConfig, strategyType: StrategyType): StrategyConfig => {
+      const getParam = (paramName: string): number | null => {
+        const regex = new RegExp(`\\('${paramName}',\\s*([0-9.]+)\\)`);
+        const match = codeStr.match(regex);
+        return match ? parseFloat(match[1]) : null;
+      };
+
+      const newC = { ...currentConfig };
+
+      // Shared mappings
+      if (getParam('stop_loss') !== null) newC.stopLoss = getParam('stop_loss')!;
+      if (getParam('take_profit') !== null) newC.takeProfit = getParam('take_profit')!;
+
+      // Strategy specific
+      if (strategyType === 'DualMA') {
+          if (getParam('period_fast') !== null) newC.shortPeriod = getParam('period_fast')!;
+          if (getParam('period_slow') !== null) newC.longPeriod = getParam('period_slow')!;
+      } else if (strategyType === 'SingleMA') {
+          if (getParam('period') !== null) newC.shortPeriod = getParam('period')!;
+      } else if (strategyType === 'SmallCap') {
+          if (getParam('volume_ratio') !== null) newC.volumeRatio = getParam('volume_ratio')!;
+          if (getParam('pe_ratio') !== null) newC.peRatio = getParam('pe_ratio')!;
+      } else if (strategyType === 'Grid') {
+          if (getParam('grid_step') !== null) newC.gridStep = getParam('grid_step')!;
+          if (getParam('grid_size') !== null) newC.gridSize = getParam('grid_size')!;
+      } else if (strategyType === 'T0') {
+          if (getParam('threshold') !== null) newC.t0Threshold = getParam('threshold')!;
+          if (getParam('take_profit') !== null) newC.t0TakeProfit = getParam('take_profit')!;
+          if (getParam('stop_loss') !== null) newC.t0StopLoss = getParam('stop_loss')!;
+      } else if (strategyType === 'LimitUp') {
+           if (getParam('threshold') !== null) newC.limitUpThreshold = getParam('threshold')!;
+           if (getParam('volume_ratio') !== null) newC.limitUpVolumeRatio = getParam('volume_ratio')!;
+           if (getParam('speed_threshold') !== null) newC.limitUpSpeedThreshold = getParam('speed_threshold')!;
+      }
+      
+      return newC;
+  };
+
   // Initialize Logs and Simulation
   useEffect(() => {
     let delay = 0;
@@ -71,18 +115,14 @@ const App: React.FC = () => {
         }, delay);
     });
     // Calculate initial metrics and trades
+    setExecutedConfig(config);
     refreshSimulation(selectedStrategy, selectedStock, config);
   }, []); // Run once on mount
 
-  // Refresh trades when config changes (debounced slightly via logic flow, but here direct for responsiveness)
-  useEffect(() => {
-      refreshSimulation(selectedStrategy, selectedStock, config);
-  }, [config, selectedStrategy, selectedStock]);
-
-  // Memoize chart data generation
+  // Memoize chart data generation depending on EXECUTED config
   const chartData = useMemo(() => {
-      return generateChartData(config.initialCapital, trades, config.startDate, config.endDate);
-  }, [config.initialCapital, trades, config.startDate, config.endDate]);
+      return generateChartData(executedConfig.initialCapital, trades, executedConfig.startDate, executedConfig.endDate);
+  }, [executedConfig.initialCapital, trades, executedConfig.startDate, executedConfig.endDate]);
 
   // --- Two-Way Binding Logic ---
 
@@ -143,64 +183,15 @@ const App: React.FC = () => {
 
   // 2. Code -> Config (Parses code to update sliders when user types)
   const updateConfigFromCode = (currentCode: string) => {
-      const getParam = (paramName: string): number | null => {
-        const regex = new RegExp(`\\('${paramName}',\\s*([0-9.]+)\\)`);
-        const match = currentCode.match(regex);
-        return match ? parseFloat(match[1]) : null;
-      };
-
-      const newC = { ...config };
-      let changed = false;
-
-      // Map python params to config keys
-      const mappings: Record<string, keyof StrategyConfig> = {
-          'period_fast': 'shortPeriod',
-          'period_slow': 'longPeriod',
-          'stop_loss': 'stopLoss',
-          'take_profit': 'takeProfit',
-          'period': 'shortPeriod', // Shared for SingleMA
-          'volume_ratio': selectedStrategy === 'SmallCap' ? 'volumeRatio' : 'limitUpVolumeRatio',
-          'pe_ratio': 'peRatio',
-          'grid_step': 'gridStep',
-          'grid_size': 'gridSize',
-          'threshold': selectedStrategy === 'T0' ? 't0Threshold' : 'limitUpThreshold',
-          'speed_threshold': 'limitUpSpeedThreshold'
-      };
-      
-      if (selectedStrategy === 'T0') {
-          if (getParam('threshold') !== null) newC.t0Threshold = getParam('threshold')!;
-          if (getParam('take_profit') !== null) newC.t0TakeProfit = getParam('take_profit')!;
-          if (getParam('stop_loss') !== null) newC.t0StopLoss = getParam('stop_loss')!;
-          changed = true;
-      } else if (selectedStrategy === 'LimitUp') {
-           if (getParam('threshold') !== null) newC.limitUpThreshold = getParam('threshold')!;
-           if (getParam('volume_ratio') !== null) newC.limitUpVolumeRatio = getParam('volume_ratio')!;
-           if (getParam('speed_threshold') !== null) newC.limitUpSpeedThreshold = getParam('speed_threshold')!;
-           changed = true;
-      } else {
-          for (const [pyParam, configKey] of Object.entries(mappings)) {
-              // Special handling for volume_ratio collision
-              if (pyParam === 'volume_ratio' && selectedStrategy !== 'SmallCap') continue;
-
-              const val = getParam(pyParam);
-              if (val !== null && val !== config[configKey]) {
-                  // @ts-ignore
-                  newC[configKey] = val;
-                  changed = true;
-              }
-          }
-      }
-      
+      // Re-use helper logic
+      const newC = parseConfigFromStrategyCode(currentCode, config, selectedStrategy);
       const capitalMatch = currentCode.match(/# Initial Capital: (\d+)/);
       if (capitalMatch) {
-          const cap = parseInt(capitalMatch[1]);
-          if (cap !== config.initialCapital) {
-              newC.initialCapital = cap;
-              changed = true;
-          }
+          newC.initialCapital = parseInt(capitalMatch[1]);
       }
-
-      if (changed) {
+      
+      // We check for changes vaguely here by object comparison (simplified)
+      if (JSON.stringify(newC) !== JSON.stringify(config)) {
           setConfig(newC);
       }
   };
@@ -232,6 +223,7 @@ const App: React.FC = () => {
   const handleStrategySelect = (type: StrategyType) => {
     setSelectedStrategy(type);
     
+    // 1. Get default code for strategy
     let newCode = STRATEGY_CODES[type];
     const lines = newCode.split('\n');
     if (lines[0].includes('strategy.py')) {
@@ -240,6 +232,11 @@ const App: React.FC = () => {
     }
     setCode(newCode);
     
+    // 2. Parse that code to get default config for this strategy
+    const newConfig = parseConfigFromStrategyCode(newCode, config, type);
+    setConfig(newConfig);
+
+    // 3. Handle stock selection constraints
     let newStock = selectedStock;
     if (type === 'SmallCap') {
         const csi300 = STOCK_POOL.find(s => s.code === 'CSI_300');
@@ -257,6 +254,10 @@ const App: React.FC = () => {
         }
     }
 
+    // 4. Run implicit simulation for the new strategy (optional but good UX to show baseline)
+    setExecutedConfig(newConfig);
+    refreshSimulation(type, newStock, newConfig);
+
     setLogs(prev => [...prev, { time: new Date().toLocaleTimeString('en-GB'), level: LogLevel.INFO, message: `[系统] 切换策略模板: ${type}` }]);
   };
 
@@ -265,6 +266,11 @@ const App: React.FC = () => {
       if (selectedStrategy !== 'SmallCap' && stock.code === 'CSI_300') return;
 
       setSelectedStock(stock);
+      // Automatically refresh results for the new stock using the LATEST executed config 
+      // (or should we use current config? Let's use current config to act as an implicit refresh)
+      setExecutedConfig(config);
+      refreshSimulation(selectedStrategy, stock, config);
+
       setLogs(prev => [...prev, { time: new Date().toLocaleTimeString('en-GB'), level: LogLevel.INFO, message: `[数据] 切换回测标的: ${stock.name} (${stock.code})` }]);
   };
 
@@ -290,13 +296,22 @@ const App: React.FC = () => {
         setActiveTab('results');
     }
 
+    // Optimize: If config hasn't changed since last run, don't re-calculate to prevent chart flicker
+    if (JSON.stringify(config) === JSON.stringify(executedConfig) && trades.length > 0) {
+        setLogs(prev => [...prev, { time: new Date().toLocaleTimeString('en-GB'), level: LogLevel.INFO, message: '[提示] 参数未变更，显示已有回测结果。' }]);
+        return;
+    }
+
     setLogs(prev => [
         ...prev, 
         { time: new Date().toLocaleTimeString('en-GB'), level: LogLevel.WARN, message: `[系统] 正在回测 ${selectedStock.name} (Capital: ${config.initialCapital})...` },
     ]);
     
+    // Commit the current config to execution state
+    setExecutedConfig(config);
+
     setTimeout(() => {
-        // Trigger a fresh calculation (although effect handles it, this confirms the 'Run' action visually in logs)
+        // Trigger a fresh calculation using the committed config
         refreshSimulation(selectedStrategy, selectedStock, config);
         
         setLogs(prev => [...prev, { time: new Date().toLocaleTimeString('en-GB'), level: LogLevel.SUCCESS, message: '[完成] 回测结束，指标已更新。' }]);
