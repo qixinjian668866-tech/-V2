@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { 
   ResponsiveContainer, 
@@ -9,17 +8,18 @@ import {
   YAxis, 
   Tooltip, 
   CartesianGrid, 
-  AreaChart,
+  AreaChart, 
   Area,
   Scatter
 } from 'recharts';
-import { ChartDataPoint, Trade, Metrics } from '../types';
+import { ChartDataPoint, Trade, Metrics, StrategyConfig } from '../types';
 import { BarChart2, ZoomOut } from 'lucide-react';
 
 interface ResultsPanelProps {
   chartData: ChartDataPoint[];
   trades: Trade[];
   metrics: Metrics;
+  config?: StrategyConfig;
 }
 
 const MetricCard: React.FC<{ label: string; value: string; color?: string }> = ({ 
@@ -41,7 +41,6 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
     return (
       <div className="bg-slate-800 border border-slate-600 p-2 rounded shadow-xl text-xs z-50">
-        {/* Date Display Restored */}
         <div className="text-slate-400 mb-1 font-mono border-b border-slate-700 pb-1">
           {label}
         </div>
@@ -49,16 +48,19 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         {dataPoint.signal && (
             <div className={`mb-1 font-bold ${dataPoint.signal === 'buy' ? 'text-red-500' : 'text-green-500'}`}>
                 {dataPoint.signal === 'buy' ? '操作: 买入' : '操作: 卖出'}
+                <span className="ml-2 text-slate-300">
+                    价: {dataPoint.price.toFixed(2)}
+                </span>
                 {dataPoint.pl !== undefined && (
                     <span className="ml-2">
-                        (盈亏: {dataPoint.pl > 0 ? '+' : ''}{dataPoint.pl})
+                        (盈亏: {dataPoint.pl > 0 ? '+' : ''}{dataPoint.pl.toFixed(0)})
                     </span>
                 )}
             </div>
         )}
         {filteredPayload.map((entry: any, index: number) => (
             <p key={index} style={{ color: entry.color, fontWeight: 'bold' }}>
-                {entry.name}
+                {entry.name}: {typeof entry.value === 'number' ? entry.value.toFixed(2) : entry.value}
             </p>
         ))}
       </div>
@@ -88,13 +90,15 @@ const renderSignal = (props: any) => {
             >
                 {isBuy ? '买' : '卖'}
             </text>
+            
+            {/* P/L Text for Sell (Next to price or further offset) */}
             {!isBuy && pl !== undefined && (
                 <text 
                     x={cx} 
-                    y={cy + 20} 
+                    y={cy - 27} 
                     textAnchor="middle" 
                     fill={pl > 0 ? '#ef4444' : '#22c55e'} 
-                    fontSize={10} 
+                    fontSize={9} 
                     fontWeight="bold"
                     style={{ textShadow: '0px 1px 2px rgba(0,0,0,0.8)' }}
                 >
@@ -105,7 +109,7 @@ const renderSignal = (props: any) => {
     );
 };
 
-const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics }) => {
+const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics, config }) => {
   const [chartMode, setChartMode] = useState<'price' | 'equity'>('price');
   
   // Zoom State
@@ -122,9 +126,6 @@ const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics 
     : chartData;
 
   const handleWheel = (e: React.WheelEvent) => {
-      // Prevent zooming if not hovering chart area specifically? 
-      // Recharts responsive container takes space, so this div wraps it.
-      
       // Calculate Zoom
       const totalLen = chartData.length;
       if (totalLen < 10) return;
@@ -171,7 +172,6 @@ const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics 
       {/* Metrics Grid */}
       <div className="p-4">
         <h3 className="text-slate-500 text-xs font-medium mb-3">核心指标</h3>
-        {/* Adjusted grid for better mobile fit */}
         <div className="grid grid-cols-3 gap-2 mb-2">
           <MetricCard label="年化收益" value={metrics.annualReturn} color="text-red-500" />
           <MetricCard label="基准年化收益" value={metrics.benchmarkReturn} color="text-red-500" />
@@ -226,9 +226,8 @@ const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics 
                         <XAxis dataKey="date" hide />
                         <YAxis domain={['auto', 'auto']} hide />
                         <Tooltip content={<CustomTooltip />} />
-                        <Line type="monotone" dataKey="ma5" stroke="#3b82f6" dot={false} strokeWidth={1} name="MA5" isAnimationActive={false} />
-                        <Line type="monotone" dataKey="ma20" stroke="#eab308" dot={false} strokeWidth={1} name="MA10" isAnimationActive={false} />
-                        {/* Scatter used for rendering custom Buy/Sell signals at the price point */}
+                        <Line type="monotone" dataKey="maShort" stroke="#3b82f6" dot={false} strokeWidth={1} name={`MA${config?.shortPeriod || 5}`} isAnimationActive={false} />
+                        <Line type="monotone" dataKey="maLong" stroke="#eab308" dot={false} strokeWidth={1} name={`MA${config?.longPeriod || 20}`} isAnimationActive={false} />
                         <Scatter dataKey="price" shape={renderSignal} name="Signal" isAnimationActive={false} />
                     </ComposedChart>
                 ) : (
@@ -259,7 +258,6 @@ const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics 
                     </AreaChart>
                 )}
             </ResponsiveContainer>
-            {/* Scroll Hint Overlay (visible initially or if user hasn't zoomed) */}
             {!zoomRange && chartData.length > 50 && (
                 <div className="absolute bottom-2 right-2 text-[10px] text-slate-600 pointer-events-none opacity-50 select-none">
                     * 滚动鼠标放大缩小

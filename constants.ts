@@ -1,5 +1,4 @@
 
-
 import { ChartDataPoint, LogEntry, LogLevel, Trade, Metrics, StrategyType, Stock, StrategyConfig } from "./types";
 
 export const STOCK_POOL: Stock[] = [
@@ -11,507 +10,430 @@ export const STOCK_POOL: Stock[] = [
   { code: 'CSI_300', name: '沪深300' }
 ];
 
-// Deterministic Random Generator
-const pseudoRandom = (seed: number) => {
-    const x = Math.sin(seed) * 10000;
-    return x - Math.floor(x);
-};
-
-// Helper to generate a hash from inputs
-const getHash = (inputs: string) => {
-    let hash = 0;
-    for (let i = 0; i < inputs.length; i++) {
-        const char = inputs.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash |= 0;
-    }
-    return hash;
-};
-
-export const generateDeterministicMetrics = (
-    strategy: StrategyType, 
-    stockCode: string, 
-    config: StrategyConfig
-): Metrics => {
-    const signature = `${strategy}-${stockCode}-${JSON.stringify(config)}`;
-    const hash = getHash(signature);
-
-    const getVal = (offset: number, min: number, max: number) => {
-        const r = pseudoRandom(Math.abs(hash + offset));
-        return min + r * (max - min);
-    };
-
-    const ret = getVal(1, 5, 55);
-    const dd = getVal(2, 6, 15);
-    const benchmark = getVal(6, 8, 12); // Range 8% - 12%
-    
-    const sharpe = (ret / 20) + getVal(3, 0, 0.5); 
-    const winRate = 45 + (ret * 0.4) + getVal(4, 0, 10);
-    const finalWinRate = Math.min(winRate, 95);
-
-    const tradeCount = Math.floor(getVal(5, 30, 120));
-
-    return {
-        annualReturn: `${ret.toFixed(2)}%`,
-        benchmarkReturn: `${benchmark.toFixed(2)}%`,
-        sharpeRatio: sharpe.toFixed(2),
-        maxDrawdown: `${dd.toFixed(2)}%`,
-        winRate: `${finalWinRate.toFixed(1)}%`,
-        tradeCount: tradeCount.toString()
-    };
-};
-
-export const DEFAULT_METRICS: Metrics = {
-    annualReturn: "25.50%",
-    benchmarkReturn: "10.50%",
-    sharpeRatio: "1.20",
-    maxDrawdown: "7.00%",
-    winRate: "62.0%",
-    tradeCount: "66"
-};
-
-export const generateDeterministicTrades = (
-    strategy: StrategyType,
-    stockCode: string,
-    config: StrategyConfig
-): Trade[] => {
-    const signature = `${strategy}-${stockCode}-${JSON.stringify(config)}`;
-    const hash = getHash(signature);
-    const trades: Trade[] = [];
-
-    // Probability of trade per day (approx)
-    let tradeProb = 0.02; // Default for trend strategies
-    let holdDurationMean = 10; 
-
-    if (strategy === 'T0') {
-        tradeProb = 0.3; // High frequency
-        holdDurationMean = 1;
-    } else if (strategy === 'Grid') {
-        tradeProb = 0.15;
-        holdDurationMean = 3;
-    } else if (strategy === 'LimitUp') {
-        tradeProb = 0.05;
-        holdDurationMean = 2;
-    } else if (strategy === 'SmallCap') {
-        tradeProb = 0.05; // Monthly-ish logic simulated via probability
-        holdDurationMean = 20;
-    }
-
-    const start = new Date(config.startDate);
-    const end = new Date(config.endDate);
-    
-    let currentDate = new Date(start);
-    let holding = false;
-    let entryPrice = 0;
-    let basePrice = 1000 + pseudoRandom(hash) * 1000; // Start price 1000-2000
-    let dayCounter = 0;
-
-    // Helper to get consistent random for a specific day
-    const getDailyVal = (offset: number) => pseudoRandom(Math.abs(hash + dayCounter * 100 + offset));
-
-    while (currentDate <= end) {
-        // Skip weekends
-        const dayOfWeek = currentDate.getDay();
-        if (dayOfWeek === 0 || dayOfWeek === 6) {
-            currentDate.setDate(currentDate.getDate() + 1);
-            continue;
-        }
-
-        const dateStr = currentDate.toISOString().split('T')[0];
-        const dailyRand = getDailyVal(0); // 0-1
-        
-        // Evolve price trend slightly
-        const volatility = strategy === 'T0' ? 0.015 : 0.03;
-        basePrice = basePrice * (1 + (getDailyVal(1) - 0.5) * volatility);
-        if (basePrice < 1) basePrice = 1;
-
-        if (holding) {
-            // Check Exit
-            const daysLeft = (end.getTime() - currentDate.getTime()) / (1000 * 3600 * 24);
-            const forceExit = daysLeft <= 1; // Close before end
-            
-            // Random exit logic based on hold duration mean
-            // simplistic poisson-like check
-            const exitProb = 1 / holdDurationMean;
-            const shouldExit = forceExit || (getDailyVal(2) < exitProb);
-
-            if (shouldExit) {
-                // Calculate P/L
-                const isWin = getDailyVal(3) > 0.45; // Base win rate 55%
-                let returnPct = 0;
-                
-                if (isWin) {
-                    // Win: 0.5% to TakeProfit%
-                    const maxTp = config.takeProfit || 10;
-                    returnPct = (0.5 + getDailyVal(4) * maxTp) / 100;
-                } else {
-                    // Loss: -0.5% to -StopLoss%
-                    const maxSl = config.stopLoss || 5;
-                    returnPct = -(0.5 + getDailyVal(4) * maxSl) / 100;
-                }
-
-                // T0 overrides
-                if (strategy === 'T0') returnPct *= 0.2;
-                if (strategy === 'LimitUp' && isWin) returnPct = 0.09 + getDailyVal(5)*0.02; // ~9-11%
-
-                const sellPrice = entryPrice * (1 + returnPct);
-                
-                // Position Sizing P/L
-                const positionSize = config.initialCapital * 0.5;
-                const shares = Math.floor(positionSize / entryPrice);
-                const pl = (sellPrice - entryPrice) * shares;
-
-                trades.push({
-                    date: dateStr,
-                    direction: 'Sell',
-                    price: Number(sellPrice.toFixed(2)),
-                    pl: Number(pl.toFixed(2))
-                });
-
-                holding = false;
-                // Update base price to match reality
-                basePrice = sellPrice;
-            }
-
-        } else {
-            // Check Entry
-            if (getDailyVal(5) < tradeProb) {
-                entryPrice = basePrice;
-                trades.push({
-                    date: dateStr,
-                    direction: 'Buy',
-                    price: Number(entryPrice.toFixed(2))
-                });
-                holding = true;
-            }
-        }
-
-        // Next Day
-        currentDate.setDate(currentDate.getDate() + 1);
-        dayCounter++;
-    }
-
-    return trades;
-};
+export const MOCK_LOGS: LogEntry[] = [
+  { time: '10:00:01', level: LogLevel.INFO, message: '[系统] 初始化回测引擎...' },
+  { time: '10:00:02', level: LogLevel.INFO, message: '[数据] 加载历史行情数据...' },
+  { time: '10:00:03', level: LogLevel.SUCCESS, message: '[系统] 策略加载成功' },
+];
 
 export const STRATEGY_CODES: Record<StrategyType, string> = {
-  'DualMA': `strategy.py                         Python 3.9
-
-# A-Share Dual Moving Average
-# 双均线策略: 短期均线上穿长期均线买入，下穿卖出
+    DualMA: `
+# A-Share Dual Moving Average Strategy
+# 双均线策略：短期均线上穿长期均线买入，下穿卖出
 
 class DualThrustStrategy(Strategy):
     params = (
-        ('period_fast', 10),  # 短期均线
-        ('period_slow', 20), # 长期均线
-        ('stop_loss', 5),    # 止损 %
-        ('take_profit', 15), # 止盈 %
+        ('period_fast', 5),   # 5日均线
+        ('period_slow', 10),  # 10日均线
+        ('stop_loss', 8),     # 止损 8%
+        ('take_profit', 200)  # 止盈 200% (Running profit)
     )
 
     def __init__(self):
+        # 初始化技术指标
         self.sma_fast = bt.indicators.SMA(
-            self.data.close,
+            self.data.close, 
             period=self.params.period_fast
         )
         self.sma_slow = bt.indicators.SMA(
-            self.data.close,
+            self.data.close, 
             period=self.params.period_slow
         )
 
     def next(self):
+        # 策略逻辑
         if not self.position:
-            if self.sma_fast > self.sma_slow:
+            if self.sma_fast[0] > self.sma_slow[0]:
                 self.buy()
-        elif self.sma_fast < self.sma_slow:
-            self.close()
-            
-        # 止盈止损逻辑 (模拟)
-        if self.position:
-             pnl_pct = (self.data.close[0] - self.position.price) / self.position.price * 100
-             if pnl_pct < -self.params.stop_loss or pnl_pct > self.params.take_profit:
-                 self.close()
+        else:
+            if self.sma_fast[0] < self.sma_slow[0]:
+                self.sell()
 `,
-  'SingleMA': `strategy.py                         Python 3.9
-
+    SingleMA: `
 # Single Moving Average Strategy
-# 单均线策略: 价格在均线上方买入，下方卖出
+# 单均线策略：价格站上均线买入，跌破卖出
 
 class SingleMAStrategy(Strategy):
     params = (
-        ('period', 10),      # 均线周期
-        ('stop_loss', 5),    # 止损 %
-        ('take_profit', 15), # 止盈 %
+        ('period', 10),       # 均线周期
+        ('stop_loss', 5),
+        ('take_profit', 15)
     )
 
     def __init__(self):
-        self.sma = bt.indicators.SMA(self.data.close, period=self.params.period)
+        self.sma = bt.indicators.SMA(
+            self.data.close, 
+            period=self.params.period
+        )
 
     def next(self):
-        if not self.position and self.data.close[0] > self.sma[0]:
-            self.buy()
-        elif self.position and self.data.close[0] < self.sma[0]:
-            self.close()
-            
-        if self.position:
-             pnl_pct = (self.data.close[0] - self.position.price) / self.position.price * 100
-             if pnl_pct < -self.params.stop_loss or pnl_pct > self.params.take_profit:
-                 self.close()
+        if not self.position:
+            if self.data.close[0] > self.sma[0]:
+                self.buy()
+        else:
+            if self.data.close[0] < self.sma[0]:
+                self.sell()
 `,
-  'SmallCap': `strategy.py                         Python 3.9
-
-# Small Market Cap Strategy
-# 小市值策略: 轮动持有市值最小的股票 (每月调仓)
+    SmallCap: `
+# Small Market Cap Rotation
+# 小市值策略：每月轮动，选择市值最小的股票
 
 class SmallCapStrategy(Strategy):
     params = (
-        ('hold_count', 3),
         ('volume_ratio', 1.5), # 量比阈值
-        ('pe_ratio', 30),      # 市盈率阈值
+        ('pe_ratio', 30)       # 市盈率上限
     )
 
     def __init__(self):
-        self.last_month = -1
+        self.last_month = None
 
     def next(self):
-        # 每月调仓逻辑：检测月份变化
-        dt = self.data.datetime.date(0)
-        if self.last_month == dt.month:
+        # 月度轮动逻辑
+        current_month = self.data.datetime.date(0).month
+        if self.last_month == current_month:
             return
-            
-        self.last_month = dt.month
         
-        # 筛选符合量比和PE条件的股票
-        candidates = [
-            d for d in self.datas 
-            if d.volume_ratio > self.params.volume_ratio 
-            and d.pe < self.params.pe_ratio
-        ]
+        self.last_month = current_month
         
-        # 按市值排序
-        sorted_stocks = sorted(candidates, key=lambda d: d.market_cap)
-        target_stocks = sorted_stocks[:self.params.hold_count]
+        # 卖出旧仓位，买入新仓位
+        if self.position:
+            self.sell()
         
-        # 卖出不在目标池的持仓
-        for stock in self.position:
-            if stock not in target_stocks:
-                self.close(stock)
-        
-        # 买入目标池股票
-        for stock in target_stocks:
-            if not self.getposition(stock):
-                self.buy(stock)
+        # 选股逻辑 (模拟)
+        if self.data.pe[0] < self.params.pe_ratio:
+            self.buy()
 `,
-  'Grid': `strategy.py                         Python 3.9
-
+    Grid: `
 # Grid Trading Strategy
-# 网格策略: 价格下跌买入，价格上涨卖出
+# 网格策略：价格下跌买入，上涨卖出
 
 class GridStrategy(Strategy):
     params = (
-        ('grid_step', 2.0),  # 网格间距 %
-        ('grid_size', 1000), # 每格交易数量
-        ('stop_loss', 5),    # 止损 %
-        ('take_profit', 15), # 止盈 %
+        ('grid_step', 2.0),   # 网格间距 2%
+        ('grid_size', 1000),  # 单笔交易数量
+        ('stop_loss', 10),
+        ('take_profit', 10)
     )
 
     def __init__(self):
         self.last_price = self.data.close[0]
 
     def next(self):
-        price = self.data.close[0]
-        step_val = self.params.grid_step / 100.0
+        change_pct = (self.data.close[0] - self.last_price) / self.last_price * 100
         
-        # 下跌超过步长，买入
-        if price <= self.last_price * (1 - step_val):
+        if change_pct <= -self.params.grid_step:
             self.buy(size=self.params.grid_size)
-            self.last_price = price
-        # 上涨超过步长，卖出
-        elif price >= self.last_price * (1 + step_val):
-            self.sell(size=self.params.grid_size)
-            self.last_price = price
+            self.last_price = self.data.close[0]
+            
+        elif change_pct >= self.params.grid_step:
+            if self.position.size >= self.params.grid_size:
+                self.sell(size=self.params.grid_size)
+                self.last_price = self.data.close[0]
 `,
-  'T0': `strategy.py                         Python 3.9
+    T0: `
+# Intraday T+0 Strategy
+# T0策略：底仓做T，高抛低吸
 
-# Intraday T+0 Strategy (日内T0)
-# 逻辑: 价格偏离昨收一定幅度反向开仓，获利或止损平仓
-
-class IntradayT0Strategy(Strategy):
+class T0Strategy(Strategy):
     params = (
-        ('threshold', 0.5),   # 开仓偏离阈值 % (默认 0.5%)
-        ('take_profit', 1.5), # 止盈 % (默认 1.5%)
-        ('stop_loss', 1.0),   # 止损 % (默认 1.0%)
+        ('threshold', 0.5),   # 开仓阈值 0.5%
+        ('take_profit', 1.5), # 止盈 1.5%
+        ('stop_loss', 1.0)    # 止损 1%
     )
 
     def next(self):
-        prev_close = self.data.close[-1] # 昨日收盘价
-        price = self.data.close[0]       # 当前价格
+        # 获取昨日收盘价 (模拟)
+        prev_close = self.data.close[-1]
+        change = (self.data.close[0] - prev_close) / prev_close * 100
         
-        # 1. 开仓逻辑
-        if not self.position:
-            # 做多T0: 价格 < 昨收 * (1 - 阈值) -> 低吸
-            if price < prev_close * (1 - self.params.threshold / 100):
-                self.buy()
-            # 做空T0: 价格 > 昨收 * (1 + 阈值) -> 高抛
-            elif price > prev_close * (1 + self.params.threshold / 100):
-                self.sell()
-                
-        # 2. 平仓逻辑 (盈亏比 1.5 : 1)
-        elif self.position:
-            # 计算浮动盈亏比例
-            if self.position.size > 0: # 持有多单
-                 pnl_pct = (price - self.position.price) / self.position.price * 100
-            else: # 持有空单
-                 pnl_pct = (self.position.price - price) / self.position.price * 100
-                 
-            # 止盈或止损
-            if pnl_pct >= self.params.take_profit or pnl_pct <= -self.params.stop_loss:
-                self.close()
+        # 做多T0
+        if change < -self.params.threshold:
+            self.buy()
+            
+        # 做空T0 (融券)
+        elif change > self.params.threshold:
+            self.sell()
 `,
-  'LimitUp': `strategy.py                         Python 3.9
-
+    LimitUp: `
 # Limit Up Strategy (Da Ban)
-# 打板策略: 涨幅超标且量比、涨速达标时扫板买入
+# 打板策略：追击涨停板
 
 class LimitUpStrategy(Strategy):
     params = (
-        ('threshold', 9.0),       # 涨幅触发阈值 %
-        ('volume_ratio', 1.2),    # 量比阈值
-        ('speed_threshold', 3.0), # 1分钟涨速阈值 %
+        ('threshold', 9.0),      # 涨幅阈值
+        ('volume_ratio', 1.2),   # 量比
+        ('speed_threshold', 3.0) # 涨速
     )
 
     def next(self):
-        prev_close = self.data.close[-1]
-        price = self.data.close[0]
+        # 计算涨幅
+        pct_change = (self.data.close[0] - self.data.open[0]) / self.data.open[0] * 100
         
-        # 计算当日涨幅
-        pct_change = (price - prev_close) / prev_close * 100
-        
-        # 模拟数据获取：量比和1分钟涨速
-        # 实际交易中需分钟线数据计算
-        current_volume_ratio = self.data.volume_ratio[0]
-        current_speed = self.data.speed_1m[0]
-
-        # 触发买入: 
-        # 1. 涨幅 > 阈值 (如 9%)
-        # 2. 量比 > 阈值 (如 1.2)
-        # 3. 1分钟涨速 > 阈值 (如 3%)
-        if not self.position:
-             if (pct_change > self.params.threshold and 
-                 current_volume_ratio > self.params.volume_ratio and
-                 current_speed > self.params.speed_threshold):
-                 self.buy() 
-            
-        # 简单的次日卖出逻辑
-        if self.position:
-             pass 
+        if pct_change > self.params.threshold:
+             # 扫板买入
+            self.buy()
 `
 };
 
 export const INITIAL_PYTHON_CODE = STRATEGY_CODES['DualMA'];
 
-export const MOCK_LOGS: LogEntry[] = [
-  { time: '17:07:25', level: LogLevel.INFO, message: '[数据] 验证标的权限 [OK]' },
-  { time: '17:07:25', level: LogLevel.INFO, message: '[数据] 下载历史行情...' },
-  { time: '17:07:25', level: LogLevel.SUCCESS, message: '[数据] 获取到 K线数据' },
-  { time: '17:07:25', level: LogLevel.INFO, message: '[编译] 策略代码编译成功' },
-  { time: '17:07:25', level: LogLevel.WARN, message: '[执行] 启动回测引擎...' },
-  { time: '17:07:25', level: LogLevel.SUCCESS, message: '[交易] 策略执行完毕' },
-  { time: '17:07:25', level: LogLevel.SUCCESS, message: '[统计] 权益结算完成' },
-];
+// Placeholder for real data (temporarily unused as per user request)
+const HENGHE_DATA = `code,date,open,high,low,close,change,volume,money
+sz300539,2024/1/2,12.4,12.58,12.35,12.51,0.008,2535300,31734437
+`;
 
-export const generateChartData = (
-    initialCapital: number, 
-    trades: Trade[],
-    startDateStr: string,
-    endDateStr: string
-): ChartDataPoint[] => {
-  const data: ChartDataPoint[] = [];
+const HOLIDAYS = new Set([
+  '2024-01-01', 
+  '2024-02-09', '2024-02-12', '2024-02-13', '2024-02-14', '2024-02-15', '2024-02-16', 
+  '2024-04-04', '2024-04-05', 
+  '2024-05-01', '2024-05-02', '2024-05-03', 
+  '2024-06-10', 
+  '2024-09-16', '2024-09-17', 
+  '2024-10-01', '2024-10-02', '2024-10-03', '2024-10-04', '2024-10-07', 
+  '2025-01-01', 
+  '2025-01-28', '2025-01-29', '2025-01-30', '2025-01-31', '2025-02-03', '2025-02-04', 
+  '2025-04-04', 
+  '2025-05-01', '2025-05-02', '2025-05-05', 
+  '2025-06-02', 
+  '2025-10-01', '2025-10-02', '2025-10-03', '2025-10-06', '2025-10-07'
+]);
+
+// Deterministic Pseudo-Random with Config-Aware Seed
+const seededRandom = (seed: number) => {
+    const x = Math.sin(seed) * 10000;
+    return x - Math.floor(x);
+};
+
+const hashCode = (str: string) => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+    }
+    return hash;
+};
+
+// --- CSV Parser ---
+const parseCSV = (csv: string) => {
+    const lines = csv.trim().split('\n');
+    const data = [];
+    // Start from 1 to skip header
+    for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].split(',');
+        if (parts.length >= 6) {
+            const dateStr = parts[1].replace(/\//g, '-');
+            data.push({
+                date: dateStr,
+                open: parseFloat(parts[2]),
+                high: parseFloat(parts[3]),
+                low: parseFloat(parts[4]),
+                close: parseFloat(parts[5])
+            });
+        }
+    }
+    return data;
+};
+
+// --- SIMULATION Engine for All Stocks ---
+export const generateDeterministicTrades = (strategy: StrategyType, stockCode: string, config: StrategyConfig): Trade[] => {
+  // NOTE: Real Data for 300539 DISABLED as per user request. 
+  // if (stockCode === '300539.SZ') {
+  //    return runRealBacktest(strategy, config).trades;
+  // }
+
+  const configString = JSON.stringify({ ...config, strategy, stockCode });
+  const seed = hashCode(configString);
   
-  // Create a map of trades for easier lookup
-  const tradesMap = new Map<string, Trade>();
-  trades.forEach(t => tradesMap.set(t.date, t));
-
-  // Parse Dates
-  const currentDate = new Date(startDateStr);
-  const endDate = new Date(endDateStr);
-
-  let price = trades.length > 0 ? trades[0].price * 0.95 : 1220; // Start slightly below first trade or default
-  let equity = initialCapital;
-  let position = 0; // 0 = cash, 1 = long
-  let shares = 0;
+  const trades: Trade[] = [];
+  const startDate = new Date(config.startDate);
+  const endDate = new Date(config.endDate);
   
-  const closePrices: number[] = [];
+  let currentDate = new Date(startDate);
+  let position = 0; 
+  let entryPrice = 0;
+  
+  const stockSeed = hashCode(stockCode);
+  const basePrice = 10 + (Math.abs(stockSeed) % 50); 
+  let currentPrice = basePrice;
+  
+  let probabilityThreshold = 0.5;
+  if (strategy === 'T0' || strategy === 'Grid') probabilityThreshold = 0.3; 
+  if (strategy === 'DualMA') probabilityThreshold = 0.8; 
+
+  let dayIndex = 0;
+  let lastMonth = -1;
 
   while (currentDate <= endDate) {
-      // 1. Format date as YYYY-MM-DD
-      const year = currentDate.getFullYear();
-      const month = String(currentDate.getMonth() + 1).padStart(2, '0');
-      const day = String(currentDate.getDate()).padStart(2, '0');
-      const dateStr = `${year}-${month}-${day}`;
-      
-      const dayOfWeek = currentDate.getDay(); // 0=Sun, 6=Sat
-      const tradeToday = tradesMap.get(dateStr);
+    dayIndex++;
+    const dayOfWeek = currentDate.getDay();
+    const dateStr = currentDate.toISOString().split('T')[0];
 
-      // Skip weekends unless there is a forced trade
-      if ((dayOfWeek === 0 || dayOfWeek === 6) && !tradeToday) {
-          currentDate.setDate(currentDate.getDate() + 1);
-          continue;
-      }
+    if (dayOfWeek === 0 || dayOfWeek === 6 || HOLIDAYS.has(dateStr)) {
+        currentDate.setDate(currentDate.getDate() + 1);
+        continue;
+    }
 
-      // 2. Determine Price & Signal
-      let signal: 'buy' | 'sell' | undefined = undefined;
+    const dailySeed = seed + dayIndex * 1000;
+    const volatility = strategy === 'SmallCap' ? 0.04 : 0.02;
+    const move = (seededRandom(dailySeed) - 0.48) * volatility; 
+    currentPrice = currentPrice * (1 + move);
 
-      if (tradeToday) {
-          price = tradeToday.price;
-          if (tradeToday.direction === 'Buy') {
-              signal = 'buy';
-              if (position === 0) {
-                  position = 1;
-                  shares = equity / price; 
-              }
-          } else {
-              signal = 'sell';
-              if (position === 1) {
-                  position = 0;
-                  equity = shares * price;
-                  shares = 0;
-              }
-          }
-      } else {
-          // Smooth random walk for non-trade days
-          const seed = currentDate.getTime();
-          const change = (Math.sin(seed) * (price * 0.01)) + ((Math.random() - 0.5) * (price * 0.02)); 
-          price += change;
-      }
+    let action = 'hold';
+    const signalSeed = seededRandom(dailySeed + 500);
 
-      // Sanity check
-      if (price < 1) price = 1;
+    if (strategy === 'SmallCap') {
+        const currentMonth = currentDate.getMonth();
+        if (currentMonth !== lastMonth) {
+             if (position === 1) {
+                 action = 'sell';
+             } else {
+                 if (signalSeed > 0.2) action = 'buy';
+             }
+             lastMonth = currentMonth;
+        }
+    } else {
+        if (position === 0) {
+            if (signalSeed > probabilityThreshold) action = 'buy';
+        } else {
+            const pnl = (currentPrice - entryPrice) / entryPrice * 100;
+            if (pnl > config.takeProfit || pnl < -config.stopLoss) {
+                action = 'sell';
+            } else if (signalSeed > probabilityThreshold && strategy !== 'DualMA') {
+                action = 'sell'; 
+            } else if (strategy === 'DualMA' && signalSeed > 0.9) {
+                action = 'sell';
+            }
+        }
+    }
 
-      // 3. Update Equity
-      if (position === 1 && !tradeToday) {
-          // Holding stock, equity floats with price
-          equity = shares * price;
-      }
+    if (action === 'buy' && position === 0) {
+        trades.push({ date: dateStr, direction: 'Buy', price: parseFloat(currentPrice.toFixed(2)), pl: 0 });
+        position = 1;
+        entryPrice = currentPrice;
+    } else if (action === 'sell' && position === 1) {
+        const realPL = (currentPrice - entryPrice) * 1000;
+        trades.push({ date: dateStr, direction: 'Sell', price: parseFloat(currentPrice.toFixed(2)), pl: parseFloat(realPL.toFixed(2)) });
+        position = 0;
+    }
 
-      closePrices.push(price);
-
-      // 4. Calculate MAs
-      const ma5 = closePrices.slice(-5).reduce((a, b) => a + b, 0) / Math.min(closePrices.length, 5);
-      const ma10 = closePrices.slice(-10).reduce((a, b) => a + b, 0) / Math.min(closePrices.length, 10);
-
-      data.push({
-          date: dateStr,
-          price: Number(price.toFixed(2)),
-          ma5: Number(ma5.toFixed(2)),
-          ma20: Number(ma10.toFixed(2)), // UI displays this as MA10
-          equity: Number(equity.toFixed(2)),
-          signal,
-          pl: tradeToday?.pl
-      });
-
-      // Increment day
-      currentDate.setDate(currentDate.getDate() + 1);
+    currentDate.setDate(currentDate.getDate() + 1);
   }
+
+  return trades;
+};
+
+// --- Chart Data Generator ---
+export const generateChartData = (
+    initialCapital: number, 
+    trades: Trade[], 
+    startDateStr: string, 
+    endDateStr: string,
+    stockCode: string,
+    config?: StrategyConfig
+): ChartDataPoint[] => {
+  // NOTE: Real Data for 300539 DISABLED. Using simulation logic.
   
+  const data: ChartDataPoint[] = [];
+  const startDate = new Date(startDateStr);
+  const endDate = new Date(endDateStr);
+  
+  let currentDate = new Date(startDate);
+  const tradeMap = new Map<string, Trade>();
+  trades.forEach(t => tradeMap.set(t.date, t));
+
+  // Initial Price Sim
+  let currentPrice = trades.length > 0 ? trades[0].price : 10;
+  // If simulation start date is before first trade, walk price backward or use base
+  // Simplified: just start random walk
+  
+  let currentEquity = initialCapital;
+  let holding = false;
+  let lastEntryPrice = 0;
+
+  while (currentDate <= endDate) {
+    const dateStr = currentDate.toISOString().split('T')[0];
+    const dayOfWeek = currentDate.getDay();
+
+    if (dayOfWeek !== 0 && dayOfWeek !== 6 && !HOLIDAYS.has(dateStr)) {
+        const trade = tradeMap.get(dateStr);
+        
+        if (trade) {
+            currentPrice = trade.price;
+            if (trade.direction === 'Buy') {
+                holding = true;
+                lastEntryPrice = currentPrice;
+            } else {
+                holding = false;
+                if (trade.pl) currentEquity += trade.pl;
+            }
+        } else {
+            const move = (Math.random() - 0.48) * 0.03;
+            currentPrice = currentPrice * (1 + move);
+        }
+        
+        let dailyEquity = currentEquity;
+        if (holding) {
+            const shares = Math.floor(currentEquity / lastEntryPrice);
+            const unrealizedPL = (currentPrice - lastEntryPrice) * shares;
+            dailyEquity = currentEquity + unrealizedPL;
+        }
+
+        data.push({
+            date: dateStr,
+            price: parseFloat(currentPrice.toFixed(2)),
+            open: parseFloat(currentPrice.toFixed(2)),
+            high: parseFloat(currentPrice.toFixed(2)),
+            low: parseFloat(currentPrice.toFixed(2)),
+            maShort: parseFloat((currentPrice * (1 + (Math.random() - 0.5) * 0.05)).toFixed(2)),
+            maLong: parseFloat((currentPrice * (1 + (Math.random() - 0.5) * 0.1)).toFixed(2)),
+            equity: Math.floor(dailyEquity),
+            signal: trade ? (trade.direction === 'Buy' ? 'buy' : 'sell') : undefined,
+            pl: trade?.pl
+        });
+    }
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+
   return data;
+};
+
+export const generateDeterministicMetrics = (strategy: StrategyType, stockCode: string, config: StrategyConfig, tradeCountInput?: number): Metrics => {
+  // Deterministic Simulation Metrics
+  const configString = JSON.stringify({ ...config, strategy, stockCode });
+  const seed = hashCode(configString);
+  const rng = () => seededRandom(seed);
+
+  const annualReturnRaw = 25 + (rng() * 30); 
+  const maxDrawdownRaw = 6 + (rng() * 9); 
+  const winRateRaw = 55 + (rng() * 20); 
+  const sharpeRaw = 1.5 + (rng() * 1.5); 
+  
+  // IMPORTANT: Use input trade count if provided (matches latest transactions)
+  const tradesRaw = tradeCountInput !== undefined ? tradeCountInput : Math.floor(20 + (rng() * 80));
+  
+  const benchmarkRaw = 8 + (seededRandom(seed + 1) * 4);
+
+  return {
+    annualReturn: `${annualReturnRaw.toFixed(2)}%`,
+    benchmarkReturn: `${benchmarkRaw.toFixed(2)}%`,
+    sharpeRatio: sharpeRaw.toFixed(2),
+    maxDrawdown: `${maxDrawdownRaw.toFixed(2)}%`,
+    winRate: `${winRateRaw.toFixed(2)}%`,
+    tradeCount: tradesRaw.toString()
+  };
+};
+
+export const DEFAULT_METRICS: Metrics = {
+  annualReturn: "0.00%",
+  benchmarkReturn: "0.00%",
+  sharpeRatio: "0.00",
+  maxDrawdown: "0.00%",
+  winRate: "0.00%",
+  tradeCount: "0"
+};
+
+// Placeholder for real backtest logic (kept for structure, currently unused)
+const runRealBacktest = (strategy: StrategyType, config: StrategyConfig) => {
+    return { trades: [], chartData: [] };
 };

@@ -49,8 +49,11 @@ export interface Trade {
 export interface ChartDataPoint {
   date: string;
   price: number;
-  ma5: number;
-  ma20: number;
+  open: number;
+  high: number;
+  low: number;
+  maShort: number;
+  maLong: number;
   equity?: number;
   signal?: 'buy' | 'sell';
   pl?: number;
