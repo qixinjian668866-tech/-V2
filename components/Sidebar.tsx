@@ -2,7 +2,7 @@
 import React, { useRef, useState } from 'react';
 import { StrategyConfig, StrategyType, Stock } from '../types';
 import { STOCK_POOL } from '../constants';
-import { Settings, Save, Search, AlertTriangle, Calendar, Wallet, Upload, Cloud } from 'lucide-react';
+import { Settings, Save, Search, AlertTriangle, Calendar, Wallet, Upload, Cloud, Bird } from 'lucide-react';
 
 interface SidebarProps {
   config: StrategyConfig;
@@ -92,7 +92,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             type="range"
             min={min}
             max={max}
-            step={key === 'volumeRatio' || key === 'gridStep' || key === 't0Threshold' || key === 't0TakeProfit' || key === 't0StopLoss' ? 0.1 : 1}
+            step={key.includes('Ratio') || key === 'gridStep' || key.includes('Threshold') || key === 't0TakeProfit' || key === 't0StopLoss' ? 0.1 : 1}
             value={config[key] as number}
             onChange={(e) => handleChange(key, parseFloat(e.target.value))}
             className="w-full h-2 md:h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-primary-500 touch-none"
@@ -292,6 +292,8 @@ const Sidebar: React.FC<SidebarProps> = ({
              {selectedStrategy === 'LimitUp' && (
                  <>
                     {renderRangeInput("打板阈值 (Threshold %)", "limitUpThreshold", 5.0, 19.0, '%')}
+                    {renderRangeInput("量比阈值 (Volume Ratio)", "limitUpVolumeRatio", 0.5, 5.0)}
+                    {renderRangeInput("涨速阈值 (Speed %)", "limitUpSpeedThreshold", 1.0, 9.0, '%')}
                 </>
             )}
         </div>

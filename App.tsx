@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import EditorPanel from './components/EditorPanel';
 import ResultsPanel from './components/ResultsPanel';
@@ -34,7 +34,9 @@ const App: React.FC = () => {
         t0Threshold: 0.5,
         t0TakeProfit: 1.5,
         t0StopLoss: 1.0,
-        limitUpThreshold: 9.0
+        limitUpThreshold: 9.0,
+        limitUpVolumeRatio: 1.2,
+        limitUpSpeedThreshold: 3.0
     };
   });
 
@@ -77,6 +79,11 @@ const App: React.FC = () => {
       refreshSimulation(selectedStrategy, selectedStock, config);
   }, [config, selectedStrategy, selectedStock]);
 
+  // Memoize chart data generation
+  const chartData = useMemo(() => {
+      return generateChartData(config.initialCapital, trades, config.startDate, config.endDate);
+  }, [config.initialCapital, trades, config.startDate, config.endDate]);
+
   // --- Two-Way Binding Logic ---
 
   // 1. Config (Slider) -> Code
@@ -113,6 +120,8 @@ const App: React.FC = () => {
         replaceParam('stop_loss', newConfig.t0StopLoss);
     } else if (selectedStrategy === 'LimitUp') {
         replaceParam('threshold', newConfig.limitUpThreshold);
+        replaceParam('volume_ratio', newConfig.limitUpVolumeRatio);
+        replaceParam('speed_threshold', newConfig.limitUpSpeedThreshold);
     }
 
     // Try to update Initial Capital comment
@@ -150,11 +159,12 @@ const App: React.FC = () => {
           'stop_loss': 'stopLoss',
           'take_profit': 'takeProfit',
           'period': 'shortPeriod', // Shared for SingleMA
-          'volume_ratio': 'volumeRatio',
+          'volume_ratio': selectedStrategy === 'SmallCap' ? 'volumeRatio' : 'limitUpVolumeRatio',
           'pe_ratio': 'peRatio',
           'grid_step': 'gridStep',
           'grid_size': 'gridSize',
           'threshold': selectedStrategy === 'T0' ? 't0Threshold' : 'limitUpThreshold',
+          'speed_threshold': 'limitUpSpeedThreshold'
       };
       
       if (selectedStrategy === 'T0') {
@@ -164,9 +174,14 @@ const App: React.FC = () => {
           changed = true;
       } else if (selectedStrategy === 'LimitUp') {
            if (getParam('threshold') !== null) newC.limitUpThreshold = getParam('threshold')!;
+           if (getParam('volume_ratio') !== null) newC.limitUpVolumeRatio = getParam('volume_ratio')!;
+           if (getParam('speed_threshold') !== null) newC.limitUpSpeedThreshold = getParam('speed_threshold')!;
            changed = true;
       } else {
           for (const [pyParam, configKey] of Object.entries(mappings)) {
+              // Special handling for volume_ratio collision
+              if (pyParam === 'volume_ratio' && selectedStrategy !== 'SmallCap') continue;
+
               const val = getParam(pyParam);
               if (val !== null && val !== config[configKey]) {
                   // @ts-ignore
@@ -319,7 +334,7 @@ const App: React.FC = () => {
           {/* Results */}
           <div className={`${activeTab === 'results' ? 'block' : 'hidden md:block'} w-full md:w-auto h-full`}>
               <ResultsPanel 
-                chartData={generateChartData(config.initialCapital, trades, config.startDate, config.endDate)}
+                chartData={chartData}
                 trades={trades}
                 metrics={metrics}
               />

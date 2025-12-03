@@ -30,6 +30,8 @@ export interface StrategyConfig {
 
   // Limit Up Params
   limitUpThreshold: number;
+  limitUpVolumeRatio: number;
+  limitUpSpeedThreshold: number;
 }
 
 export interface Stock {

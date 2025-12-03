@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ResponsiveContainer, 
   ComposedChart, 
@@ -13,7 +13,7 @@ import {
   Scatter
 } from 'recharts';
 import { ChartDataPoint, Trade, Metrics } from '../types';
-import { BarChart2 } from 'lucide-react';
+import { BarChart2, ZoomOut } from 'lucide-react';
 
 interface ResultsPanelProps {
   chartData: ChartDataPoint[];
@@ -106,6 +106,58 @@ const renderSignal = (props: any) => {
 
 const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics }) => {
   const [chartMode, setChartMode] = useState<'price' | 'equity'>('price');
+  
+  // Zoom State
+  const [zoomRange, setZoomRange] = useState<{ start: number; end: number } | null>(null);
+
+  // Reset zoom when data changes completely (e.g. new backtest)
+  useEffect(() => {
+    setZoomRange(null);
+  }, [chartData]);
+
+  // Determine visible data
+  const visibleData = zoomRange 
+    ? chartData.slice(zoomRange.start, zoomRange.end) 
+    : chartData;
+
+  const handleWheel = (e: React.WheelEvent) => {
+      // Prevent zooming if not hovering chart area specifically? 
+      // Recharts responsive container takes space, so this div wraps it.
+      
+      // Calculate Zoom
+      const totalLen = chartData.length;
+      if (totalLen < 10) return;
+
+      const currentStart = zoomRange ? zoomRange.start : 0;
+      const currentEnd = zoomRange ? zoomRange.end : totalLen;
+      const currentLen = currentEnd - currentStart;
+
+      const ZOOM_SPEED = 0.1; // 10%
+      let delta = Math.floor(currentLen * ZOOM_SPEED);
+      if (delta < 1) delta = 1;
+
+      let newStart = currentStart;
+      let newEnd = currentEnd;
+
+      if (e.deltaY < 0) {
+          // Zoom In (Shrink range)
+          newStart = Math.min(currentStart + delta, currentEnd - 10);
+          newEnd = Math.max(currentEnd - delta, currentStart + 10);
+      } else {
+          // Zoom Out (Expand range)
+          newStart = Math.max(0, currentStart - delta);
+          newEnd = Math.min(totalLen, currentEnd + delta);
+      }
+      
+      // Only update if valid range > 10 points
+      if (newEnd - newStart >= 10) {
+          setZoomRange({ start: newStart, end: newEnd });
+      }
+  };
+
+  const handleResetZoom = () => {
+      setZoomRange(null);
+  };
 
   return (
     <div className="w-full md:w-96 bg-slate-900 border-l border-slate-700 flex flex-col h-full overflow-y-auto pb-20 md:pb-0">
@@ -148,23 +200,38 @@ const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics 
                     账户净值
                 </button>
             </div>
+            
+            {/* Zoom Controls Overlay */}
+            {zoomRange && (
+                 <button 
+                    onClick={handleResetZoom}
+                    className="flex items-center gap-1 px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded text-[10px] text-slate-300 transition-colors"
+                    title="重置缩放"
+                 >
+                     <ZoomOut className="w-3 h-3" />
+                     复位
+                 </button>
+            )}
         </div>
         
-        <div className="flex-1 w-full min-h-[250px]">
+        <div 
+            className="flex-1 w-full min-h-[250px] relative"
+            onWheel={handleWheel}
+        >
             <ResponsiveContainer width="100%" height="100%">
                 {chartMode === 'price' ? (
-                    <ComposedChart data={chartData}>
+                    <ComposedChart data={visibleData}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
                         <XAxis dataKey="date" hide />
                         <YAxis domain={['auto', 'auto']} hide />
                         <Tooltip content={<CustomTooltip />} />
-                        <Line type="monotone" dataKey="ma5" stroke="#3b82f6" dot={false} strokeWidth={1} name="MA5" />
-                        <Line type="monotone" dataKey="ma20" stroke="#eab308" dot={false} strokeWidth={1} name="MA10" />
+                        <Line type="monotone" dataKey="ma5" stroke="#3b82f6" dot={false} strokeWidth={1} name="MA5" isAnimationActive={false} />
+                        <Line type="monotone" dataKey="ma20" stroke="#eab308" dot={false} strokeWidth={1} name="MA10" isAnimationActive={false} />
                         {/* Scatter used for rendering custom Buy/Sell signals at the price point */}
                         <Scatter dataKey="price" shape={renderSignal} name="Signal" isAnimationActive={false} />
                     </ComposedChart>
                 ) : (
-                    <AreaChart data={chartData}>
+                    <AreaChart data={visibleData}>
                         <defs>
                             <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="5%" stopColor="#8884d8" stopOpacity={0.4}/>
@@ -186,10 +253,17 @@ const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics 
                             fillOpacity={1} 
                             fill="url(#colorEquity)" 
                             name="Net Value"
+                            isAnimationActive={false}
                         />
                     </AreaChart>
                 )}
             </ResponsiveContainer>
+            {/* Scroll Hint Overlay (visible initially or if user hasn't zoomed) */}
+            {!zoomRange && chartData.length > 50 && (
+                <div className="absolute bottom-2 right-2 text-[10px] text-slate-600 pointer-events-none opacity-50 select-none">
+                    * 滚动鼠标放大缩小
+                </div>
+            )}
         </div>
       </div>
 

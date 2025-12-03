@@ -77,87 +77,116 @@ export const generateDeterministicTrades = (
     const hash = getHash(signature);
     const trades: Trade[] = [];
 
-    const getVal = (seedOffset: number) => pseudoRandom(Math.abs(hash + seedOffset));
-    
-    // Determine number of trades based on strategy
-    let tradeCountBase = 5;
-    if (strategy === 'T0' || strategy === 'Grid') tradeCountBase = 15;
-    if (strategy === 'SmallCap') tradeCountBase = 8;
-    
-    const numTrades = Math.floor(tradeCountBase + getVal(0) * 10); // 5-15 or 15-25 trades
-    
-    // Date Range Logic
+    // Probability of trade per day (approx)
+    let tradeProb = 0.02; // Default for trend strategies
+    let holdDurationMean = 10; 
+
+    if (strategy === 'T0') {
+        tradeProb = 0.3; // High frequency
+        holdDurationMean = 1;
+    } else if (strategy === 'Grid') {
+        tradeProb = 0.15;
+        holdDurationMean = 3;
+    } else if (strategy === 'LimitUp') {
+        tradeProb = 0.05;
+        holdDurationMean = 2;
+    } else if (strategy === 'SmallCap') {
+        tradeProb = 0.05; // Monthly-ish logic simulated via probability
+        holdDurationMean = 20;
+    }
+
     const start = new Date(config.startDate);
     const end = new Date(config.endDate);
-    const totalDays = (end.getTime() - start.getTime()) / (1000 * 3600 * 24);
     
-    let currentDayOffset = 0;
-    let basePrice = 1200 + getVal(1) * 500; // Start price 1200-1700
+    let currentDate = new Date(start);
+    let holding = false;
+    let entryPrice = 0;
+    let basePrice = 1000 + pseudoRandom(hash) * 1000; // Start price 1000-2000
+    let dayCounter = 0;
 
-    for (let i = 0; i < numTrades; i++) {
-        // 1. Generate Dates (Buy and Sell)
-        // Advance time: random jump 5-20 days
-        const jump = Math.floor(5 + getVal(i * 10 + 2) * (totalDays / numTrades));
-        currentDayOffset += jump;
-        if (currentDayOffset >= totalDays) break;
+    // Helper to get consistent random for a specific day
+    const getDailyVal = (offset: number) => pseudoRandom(Math.abs(hash + dayCounter * 100 + offset));
 
-        const buyDate = new Date(start.getTime() + currentDayOffset * 24 * 3600 * 1000);
-        
-        // Hold duration: 1-10 days
-        const holdDuration = Math.max(1, Math.floor(getVal(i * 10 + 3) * 10));
-        const sellDate = new Date(buyDate.getTime() + holdDuration * 24 * 3600 * 1000);
-        if (sellDate > end) break;
+    while (currentDate <= end) {
+        // Skip weekends
+        const dayOfWeek = currentDate.getDay();
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+            currentDate.setDate(currentDate.getDate() + 1);
+            continue;
+        }
 
-        // 2. Generate Price
-        const priceVolatility = strategy === 'T0' ? 0.02 : 0.08; // T0 has smaller moves
-        const buyPrice = basePrice * (1 + (getVal(i * 10 + 4) - 0.5) * priceVolatility);
+        const dateStr = currentDate.toISOString().split('T')[0];
+        const dailyRand = getDailyVal(0); // 0-1
         
-        // 3. Generate P/L based on Strategy & Config
-        // Higher win rate for some strategies, higher P/L for others
-        const isWin = getVal(i * 10 + 5) > 0.4; // 60% win chance base
-        
-        let returnPct = 0;
-        if (isWin) {
-            // Win: 1% to TakeProfit%
-            const maxTp = config.takeProfit || 10;
-            returnPct = (0.5 + getVal(i * 10 + 6) * maxTp) / 100;
+        // Evolve price trend slightly
+        const volatility = strategy === 'T0' ? 0.015 : 0.03;
+        basePrice = basePrice * (1 + (getDailyVal(1) - 0.5) * volatility);
+        if (basePrice < 1) basePrice = 1;
+
+        if (holding) {
+            // Check Exit
+            const daysLeft = (end.getTime() - currentDate.getTime()) / (1000 * 3600 * 24);
+            const forceExit = daysLeft <= 1; // Close before end
+            
+            // Random exit logic based on hold duration mean
+            // simplistic poisson-like check
+            const exitProb = 1 / holdDurationMean;
+            const shouldExit = forceExit || (getDailyVal(2) < exitProb);
+
+            if (shouldExit) {
+                // Calculate P/L
+                const isWin = getDailyVal(3) > 0.45; // Base win rate 55%
+                let returnPct = 0;
+                
+                if (isWin) {
+                    // Win: 0.5% to TakeProfit%
+                    const maxTp = config.takeProfit || 10;
+                    returnPct = (0.5 + getDailyVal(4) * maxTp) / 100;
+                } else {
+                    // Loss: -0.5% to -StopLoss%
+                    const maxSl = config.stopLoss || 5;
+                    returnPct = -(0.5 + getDailyVal(4) * maxSl) / 100;
+                }
+
+                // T0 overrides
+                if (strategy === 'T0') returnPct *= 0.2;
+                if (strategy === 'LimitUp' && isWin) returnPct = 0.09 + getDailyVal(5)*0.02; // ~9-11%
+
+                const sellPrice = entryPrice * (1 + returnPct);
+                
+                // Position Sizing P/L
+                const positionSize = config.initialCapital * 0.5;
+                const shares = Math.floor(positionSize / entryPrice);
+                const pl = (sellPrice - entryPrice) * shares;
+
+                trades.push({
+                    date: dateStr,
+                    direction: 'Sell',
+                    price: Number(sellPrice.toFixed(2)),
+                    pl: Number(pl.toFixed(2))
+                });
+
+                holding = false;
+                // Update base price to match reality
+                basePrice = sellPrice;
+            }
+
         } else {
-            // Loss: -0.5% to -StopLoss%
-            const maxSl = config.stopLoss || 5;
-            returnPct = -(0.5 + getVal(i * 10 + 6) * maxSl) / 100;
+            // Check Entry
+            if (getDailyVal(5) < tradeProb) {
+                entryPrice = basePrice;
+                trades.push({
+                    date: dateStr,
+                    direction: 'Buy',
+                    price: Number(entryPrice.toFixed(2))
+                });
+                holding = true;
+            }
         }
-        
-        // T0 overrides: smaller moves
-        if (strategy === 'T0') {
-            returnPct = returnPct * 0.2; 
-        }
 
-        const sellPrice = buyPrice * (1 + returnPct);
-        
-        // Calculate P/L Value
-        // Simple position sizing: use ~50% of capital per trade
-        const positionSize = config.initialCapital * 0.5; 
-        const shares = Math.floor(positionSize / buyPrice);
-        const pl = (sellPrice - buyPrice) * shares;
-
-        // Add Buy Trade
-        trades.push({
-            date: buyDate.toISOString().split('T')[0],
-            direction: 'Buy',
-            price: Number(buyPrice.toFixed(2))
-        });
-
-        // Add Sell Trade
-        trades.push({
-            date: sellDate.toISOString().split('T')[0],
-            direction: 'Sell',
-            price: Number(sellPrice.toFixed(2)),
-            pl: Number(pl.toFixed(2))
-        });
-        
-        // Update base price for next iteration drift
-        basePrice = sellPrice;
-        currentDayOffset += holdDuration;
+        // Next Day
+        currentDate.setDate(currentDate.getDate() + 1);
+        dayCounter++;
     }
 
     return trades;
@@ -339,11 +368,13 @@ class IntradayT0Strategy(Strategy):
   'LimitUp': `strategy.py                         Python 3.9
 
 # Limit Up Strategy (Da Ban)
-# 打板策略: 涨幅超过阈值(如9%)时扫板买入
+# 打板策略: 涨幅超标且量比、涨速达标时扫板买入
 
 class LimitUpStrategy(Strategy):
     params = (
-        ('threshold', 9.0),  # 涨幅触发阈值 %
+        ('threshold', 9.0),       # 涨幅触发阈值 %
+        ('volume_ratio', 1.2),    # 量比阈值
+        ('speed_threshold', 3.0), # 1分钟涨速阈值 %
     )
 
     def next(self):
@@ -353,13 +384,23 @@ class LimitUpStrategy(Strategy):
         # 计算当日涨幅
         pct_change = (price - prev_close) / prev_close * 100
         
-        # 触发买入: 涨幅 > 9% 且当前无持仓
-        if not self.position and pct_change > self.params.threshold:
-            self.buy() 
+        # 模拟数据获取：量比和1分钟涨速
+        # 实际交易中需分钟线数据计算
+        current_volume_ratio = self.data.volume_ratio[0]
+        current_speed = self.data.speed_1m[0]
+
+        # 触发买入: 
+        # 1. 涨幅 > 阈值 (如 9%)
+        # 2. 量比 > 阈值 (如 1.2)
+        # 3. 1分钟涨速 > 阈值 (如 3%)
+        if not self.position:
+             if (pct_change > self.params.threshold and 
+                 current_volume_ratio > self.params.volume_ratio and
+                 current_speed > self.params.speed_threshold):
+                 self.buy() 
             
-        # 简单的次日卖出逻辑 (模拟)
+        # 简单的次日卖出逻辑
         if self.position:
-             # 如果开板或者次日择机卖出
              pass 
 `
 };
