@@ -1,6 +1,6 @@
 
 import React, { useRef, useEffect } from 'react';
-import { Play, Terminal, Wand2, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
+import { Play, Terminal, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
 import { LogEntry, LogLevel } from '../types';
 
 interface EditorPanelProps {
@@ -8,8 +8,6 @@ interface EditorPanelProps {
   onCodeChange: (code: string) => void;
   logs: LogEntry[];
   onRun: () => void;
-  onAnalyze: () => void;
-  isAnalyzing: boolean;
 }
 
 const LogItem: React.FC<{ entry: LogEntry }> = ({ entry }) => {
@@ -30,9 +28,7 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
   code, 
   onCodeChange, 
   logs, 
-  onRun, 
-  onAnalyze, 
-  isAnalyzing 
+  onRun
 }) => {
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
@@ -52,17 +48,6 @@ const EditorPanel: React.FC<EditorPanelProps> = ({
           <span className="text-xs text-slate-500 font-mono hidden md:inline">strategy.py</span>
         </div>
         <div className="flex items-center gap-2 w-full md:w-auto">
-           <button 
-            onClick={onAnalyze}
-            disabled={isAnalyzing}
-            className={`flex-1 md:flex-none justify-center md:justify-start flex items-center gap-1.5 px-3 py-2 md:py-1.5 rounded text-xs font-medium transition-colors ${
-                isAnalyzing ? 'bg-purple-900/50 text-purple-300 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-500 text-white'
-            }`}
-          >
-            <Wand2 className={`w-3.5 h-3.5 ${isAnalyzing ? 'animate-spin' : ''}`} />
-            {isAnalyzing ? 'AI Thinking' : 'AI Analyze'}
-          </button>
-          
           <button 
             onClick={onRun}
             className="flex-1 md:flex-none justify-center md:justify-start flex items-center gap-1.5 bg-accent-600 hover:bg-accent-500 text-white px-4 py-2 md:py-1.5 rounded text-xs font-medium transition-colors shadow-lg shadow-red-900/20"

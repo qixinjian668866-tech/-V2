@@ -8,9 +8,9 @@ import {
   YAxis, 
   Tooltip, 
   CartesianGrid, 
-  Scatter,
   AreaChart,
-  Area
+  Area,
+  Scatter
 } from 'recharts';
 import { ChartDataPoint, Trade, Metrics } from '../types';
 import { BarChart2 } from 'lucide-react';
@@ -34,23 +34,74 @@ const MetricCard: React.FC<{ label: string; value: string; color?: string }> = (
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
+    // Filter out Signal and price entries, keeping only MA lines
+    const filteredPayload = payload.filter((entry: any) => entry.name !== 'Signal' && entry.name !== 'price');
+    const dataPoint = payload[0].payload as ChartDataPoint;
+
     return (
       <div className="bg-slate-800 border border-slate-600 p-2 rounded shadow-xl text-xs z-50">
-        <p className="text-slate-300 font-bold mb-1">{label}</p>
-        {payload.map((entry: any, index: number) => (
-            <p key={index} style={{ color: entry.color }}>
-                {entry.name}: {entry.value.toLocaleString()}
+        {/* Date Display Restored */}
+        <div className="text-slate-400 mb-1 font-mono border-b border-slate-700 pb-1">
+          {label}
+        </div>
+
+        {dataPoint.signal && (
+            <div className={`mb-1 font-bold ${dataPoint.signal === 'buy' ? 'text-red-500' : 'text-green-500'}`}>
+                {dataPoint.signal === 'buy' ? '操作: 买入' : '操作: 卖出'}
+                {dataPoint.pl !== undefined && (
+                    <span className="ml-2">
+                        (盈亏: {dataPoint.pl > 0 ? '+' : ''}{dataPoint.pl})
+                    </span>
+                )}
+            </div>
+        )}
+        {filteredPayload.map((entry: any, index: number) => (
+            <p key={index} style={{ color: entry.color, fontWeight: 'bold' }}>
+                {entry.name}
             </p>
         ))}
-        {payload[0].payload.signal && (
-             <p className={`font-bold mt-1 ${payload[0].payload.signal === 'buy' ? 'text-red-500' : 'text-green-500'}`}>
-                Signal: {payload[0].payload.signal.toUpperCase()}
-             </p>
-        )}
       </div>
     );
   }
   return null;
+};
+
+const renderSignal = (props: any) => {
+    const { cx, cy, payload } = props;
+    if (!payload.signal) return null;
+    
+    const isBuy = payload.signal === 'buy';
+    const pl = payload.pl;
+    
+    return (
+        <g>
+            <circle cx={cx} cy={cy} r={9} fill={isBuy ? "#ef4444" : "#22c55e"} stroke="#1e293b" strokeWidth={2} />
+            <text 
+                x={cx} 
+                y={cy} 
+                dy={3} 
+                textAnchor="middle" 
+                fill="white" 
+                fontSize={10} 
+                fontWeight="bold"
+            >
+                {isBuy ? '买' : '卖'}
+            </text>
+            {!isBuy && pl !== undefined && (
+                <text 
+                    x={cx} 
+                    y={cy + 20} 
+                    textAnchor="middle" 
+                    fill={pl > 0 ? '#ef4444' : '#22c55e'} 
+                    fontSize={10} 
+                    fontWeight="bold"
+                    style={{ textShadow: '0px 1px 2px rgba(0,0,0,0.8)' }}
+                >
+                    {pl > 0 ? '+' : ''}{pl.toFixed(0)}
+                </text>
+            )}
+        </g>
+    );
 };
 
 const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics }) => {
@@ -107,19 +158,10 @@ const ResultsPanel: React.FC<ResultsPanelProps> = ({ chartData, trades, metrics 
                         <XAxis dataKey="date" hide />
                         <YAxis domain={['auto', 'auto']} hide />
                         <Tooltip content={<CustomTooltip />} />
-                        <Line type="monotone" dataKey="price" stroke="#64748b" dot={false} strokeWidth={1} name="Price" />
                         <Line type="monotone" dataKey="ma5" stroke="#3b82f6" dot={false} strokeWidth={1} name="MA5" />
-                        <Line type="monotone" dataKey="ma20" stroke="#eab308" dot={false} strokeWidth={1} name="MA20" />
-                        <Scatter dataKey="price" fill="none" shape={(props: any) => {
-                            const { cx, cy, payload } = props;
-                            if (payload.signal === 'buy') {
-                                return <path d={`M${cx},${cy+10} L${cx-4},${cy+18} L${cx+4},${cy+18} Z`} fill="#ef4444" />; // Red Up Arrow
-                            }
-                            if (payload.signal === 'sell') {
-                                return <path d={`M${cx},${cy-10} L${cx-4},${cy-18} L${cx+4},${cy-18} Z`} fill="#10b981" />; // Green Down Arrow
-                            }
-                            return null;
-                        }} />
+                        <Line type="monotone" dataKey="ma20" stroke="#eab308" dot={false} strokeWidth={1} name="MA10" />
+                        {/* Scatter used for rendering custom Buy/Sell signals at the price point */}
+                        <Scatter dataKey="price" shape={renderSignal} name="Signal" isAnimationActive={false} />
                     </ComposedChart>
                 ) : (
                     <AreaChart data={chartData}>

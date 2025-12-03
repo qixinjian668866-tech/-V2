@@ -16,20 +16,24 @@ const pseudoRandom = (seed: number) => {
     return x - Math.floor(x);
 };
 
+// Helper to generate a hash from inputs
+const getHash = (inputs: string) => {
+    let hash = 0;
+    for (let i = 0; i < inputs.length; i++) {
+        const char = inputs.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash |= 0;
+    }
+    return hash;
+};
+
 export const generateDeterministicMetrics = (
     strategy: StrategyType, 
     stockCode: string, 
     config: StrategyConfig
 ): Metrics => {
-    const configStr = JSON.stringify(config);
-    const signature = `${strategy}-${stockCode}-${configStr}`;
-
-    let hash = 0;
-    for (let i = 0; i < signature.length; i++) {
-        const char = signature.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash |= 0;
-    }
+    const signature = `${strategy}-${stockCode}-${JSON.stringify(config)}`;
+    const hash = getHash(signature);
 
     const getVal = (offset: number, min: number, max: number) => {
         const r = pseudoRandom(Math.abs(hash + offset));
@@ -62,6 +66,101 @@ export const DEFAULT_METRICS: Metrics = {
     maxDrawdown: "7.00%",
     winRate: "62.0%",
     tradeCount: "66"
+};
+
+export const generateDeterministicTrades = (
+    strategy: StrategyType,
+    stockCode: string,
+    config: StrategyConfig
+): Trade[] => {
+    const signature = `${strategy}-${stockCode}-${JSON.stringify(config)}`;
+    const hash = getHash(signature);
+    const trades: Trade[] = [];
+
+    const getVal = (seedOffset: number) => pseudoRandom(Math.abs(hash + seedOffset));
+    
+    // Determine number of trades based on strategy
+    let tradeCountBase = 5;
+    if (strategy === 'T0' || strategy === 'Grid') tradeCountBase = 15;
+    if (strategy === 'SmallCap') tradeCountBase = 8;
+    
+    const numTrades = Math.floor(tradeCountBase + getVal(0) * 10); // 5-15 or 15-25 trades
+    
+    // Date Range Logic
+    const start = new Date(config.startDate);
+    const end = new Date(config.endDate);
+    const totalDays = (end.getTime() - start.getTime()) / (1000 * 3600 * 24);
+    
+    let currentDayOffset = 0;
+    let basePrice = 1200 + getVal(1) * 500; // Start price 1200-1700
+
+    for (let i = 0; i < numTrades; i++) {
+        // 1. Generate Dates (Buy and Sell)
+        // Advance time: random jump 5-20 days
+        const jump = Math.floor(5 + getVal(i * 10 + 2) * (totalDays / numTrades));
+        currentDayOffset += jump;
+        if (currentDayOffset >= totalDays) break;
+
+        const buyDate = new Date(start.getTime() + currentDayOffset * 24 * 3600 * 1000);
+        
+        // Hold duration: 1-10 days
+        const holdDuration = Math.max(1, Math.floor(getVal(i * 10 + 3) * 10));
+        const sellDate = new Date(buyDate.getTime() + holdDuration * 24 * 3600 * 1000);
+        if (sellDate > end) break;
+
+        // 2. Generate Price
+        const priceVolatility = strategy === 'T0' ? 0.02 : 0.08; // T0 has smaller moves
+        const buyPrice = basePrice * (1 + (getVal(i * 10 + 4) - 0.5) * priceVolatility);
+        
+        // 3. Generate P/L based on Strategy & Config
+        // Higher win rate for some strategies, higher P/L for others
+        const isWin = getVal(i * 10 + 5) > 0.4; // 60% win chance base
+        
+        let returnPct = 0;
+        if (isWin) {
+            // Win: 1% to TakeProfit%
+            const maxTp = config.takeProfit || 10;
+            returnPct = (0.5 + getVal(i * 10 + 6) * maxTp) / 100;
+        } else {
+            // Loss: -0.5% to -StopLoss%
+            const maxSl = config.stopLoss || 5;
+            returnPct = -(0.5 + getVal(i * 10 + 6) * maxSl) / 100;
+        }
+        
+        // T0 overrides: smaller moves
+        if (strategy === 'T0') {
+            returnPct = returnPct * 0.2; 
+        }
+
+        const sellPrice = buyPrice * (1 + returnPct);
+        
+        // Calculate P/L Value
+        // Simple position sizing: use ~50% of capital per trade
+        const positionSize = config.initialCapital * 0.5; 
+        const shares = Math.floor(positionSize / buyPrice);
+        const pl = (sellPrice - buyPrice) * shares;
+
+        // Add Buy Trade
+        trades.push({
+            date: buyDate.toISOString().split('T')[0],
+            direction: 'Buy',
+            price: Number(buyPrice.toFixed(2))
+        });
+
+        // Add Sell Trade
+        trades.push({
+            date: sellDate.toISOString().split('T')[0],
+            direction: 'Sell',
+            price: Number(sellPrice.toFixed(2)),
+            pl: Number(pl.toFixed(2))
+        });
+        
+        // Update base price for next iteration drift
+        basePrice = sellPrice;
+        currentDayOffset += holdDuration;
+    }
+
+    return trades;
 };
 
 export const STRATEGY_CODES: Record<StrategyType, string> = {
@@ -267,14 +366,6 @@ class LimitUpStrategy(Strategy):
 
 export const INITIAL_PYTHON_CODE = STRATEGY_CODES['DualMA'];
 
-export const MOCK_TRADES: Trade[] = [
-  { date: '2025-10-29', direction: 'Buy', price: 1233.31 },
-  { date: '2025-10-30', direction: 'Sell', price: 1215.74, pl: -175.70 },
-  { date: '2025-11-15', direction: 'Buy', price: 1240.50 },
-  { date: '2025-11-20', direction: 'Sell', price: 1280.10, pl: 3960.00 },
-  { date: '2025-12-01', direction: 'Buy', price: 1290.00 },
-];
-
 export const MOCK_LOGS: LogEntry[] = [
   { time: '17:07:25', level: LogLevel.INFO, message: '[数据] 验证标的权限 [OK]' },
   { time: '17:07:25', level: LogLevel.INFO, message: '[数据] 下载历史行情...' },
@@ -285,46 +376,99 @@ export const MOCK_LOGS: LogEntry[] = [
   { time: '17:07:25', level: LogLevel.SUCCESS, message: '[统计] 权益结算完成' },
 ];
 
-export const generateChartData = (initialCapital: number = 100000): ChartDataPoint[] => {
+export const generateChartData = (
+    initialCapital: number, 
+    trades: Trade[],
+    startDateStr: string,
+    endDateStr: string
+): ChartDataPoint[] => {
   const data: ChartDataPoint[] = [];
-  let price = 1200;
+  
+  // Create a map of trades for easier lookup
+  const tradesMap = new Map<string, Trade>();
+  trades.forEach(t => tradesMap.set(t.date, t));
+
+  // Parse Dates
+  const currentDate = new Date(startDateStr);
+  const endDate = new Date(endDateStr);
+
+  let price = trades.length > 0 ? trades[0].price * 0.95 : 1220; // Start slightly below first trade or default
   let equity = initialCapital;
   let position = 0; // 0 = cash, 1 = long
+  let shares = 0;
+  
+  const closePrices: number[] = [];
 
-  for (let i = 0; i < 50; i++) {
-    const change = (Math.random() - 0.40) * 30;
-    const prevPrice = price;
-    price += change;
-    const ma5 = price + (Math.random() - 0.5) * 20;
-    const ma20 = price + (Math.random() - 0.5) * 40;
-    
-    let signal: 'buy' | 'sell' | undefined = undefined;
-    if (i === 10) signal = 'buy';
-    if (i === 25) signal = 'sell';
-    if (i === 35) signal = 'buy';
+  while (currentDate <= endDate) {
+      // 1. Format date as YYYY-MM-DD
+      const year = currentDate.getFullYear();
+      const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+      const day = String(currentDate.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+      
+      const dayOfWeek = currentDate.getDay(); // 0=Sun, 6=Sat
+      const tradeToday = tradesMap.get(dateStr);
 
-    // Simulate Equity
-    if (signal === 'buy') {
-        position = 1;
-    } else if (signal === 'sell') {
-        position = 0;
-    }
+      // Skip weekends unless there is a forced trade
+      if ((dayOfWeek === 0 || dayOfWeek === 6) && !tradeToday) {
+          currentDate.setDate(currentDate.getDate() + 1);
+          continue;
+      }
 
-    if (position === 1) {
-        // Holding stock, equity changes with price percent change
-        const pctChange = (price - prevPrice) / prevPrice;
-        equity = equity * (1 + pctChange);
-    } 
-    // If position is 0, equity stays flat (ignoring interest)
+      // 2. Determine Price & Signal
+      let signal: 'buy' | 'sell' | undefined = undefined;
 
-    data.push({
-      date: `2025-11-${(i + 1).toString().padStart(2, '0')}`,
-      price: Math.round(price * 100) / 100,
-      ma5: Math.round(ma5 * 100) / 100,
-      ma20: Math.round(ma20 * 100) / 100,
-      equity: Math.round(equity * 100) / 100,
-      signal
-    });
+      if (tradeToday) {
+          price = tradeToday.price;
+          if (tradeToday.direction === 'Buy') {
+              signal = 'buy';
+              if (position === 0) {
+                  position = 1;
+                  shares = equity / price; 
+              }
+          } else {
+              signal = 'sell';
+              if (position === 1) {
+                  position = 0;
+                  equity = shares * price;
+                  shares = 0;
+              }
+          }
+      } else {
+          // Smooth random walk for non-trade days
+          const seed = currentDate.getTime();
+          const change = (Math.sin(seed) * (price * 0.01)) + ((Math.random() - 0.5) * (price * 0.02)); 
+          price += change;
+      }
+
+      // Sanity check
+      if (price < 1) price = 1;
+
+      // 3. Update Equity
+      if (position === 1 && !tradeToday) {
+          // Holding stock, equity floats with price
+          equity = shares * price;
+      }
+
+      closePrices.push(price);
+
+      // 4. Calculate MAs
+      const ma5 = closePrices.slice(-5).reduce((a, b) => a + b, 0) / Math.min(closePrices.length, 5);
+      const ma10 = closePrices.slice(-10).reduce((a, b) => a + b, 0) / Math.min(closePrices.length, 10);
+
+      data.push({
+          date: dateStr,
+          price: Number(price.toFixed(2)),
+          ma5: Number(ma5.toFixed(2)),
+          ma20: Number(ma10.toFixed(2)), // UI displays this as MA10
+          equity: Number(equity.toFixed(2)),
+          signal,
+          pl: tradeToday?.pl
+      });
+
+      // Increment day
+      currentDate.setDate(currentDate.getDate() + 1);
   }
+  
   return data;
 };

@@ -296,21 +296,6 @@ const Sidebar: React.FC<SidebarProps> = ({
             )}
         </div>
 
-        <div className="mt-8 flex gap-2">
-          <button 
-            onClick={onSave}
-            disabled={isDualMAInvalid}
-            className={`w-full px-3 py-3 md:py-2 rounded text-sm flex items-center justify-center gap-1 transition-colors ${
-                isDualMAInvalid 
-                ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
-                : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
-            }`}
-          >
-            <Save className="w-4 h-4" />
-            保存当前参数
-          </button>
-        </div>
-
         <div className="mt-auto pt-6">
             <p className="text-[10px] text-slate-600 text-center leading-relaxed">
                 该软件只提供回测训练，不可实盘且不构成任何投资建议。

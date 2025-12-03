@@ -51,6 +51,7 @@ export interface ChartDataPoint {
   ma20: number;
   equity?: number;
   signal?: 'buy' | 'sell';
+  pl?: number;
 }
 
 export interface Metric {

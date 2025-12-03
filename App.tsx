@@ -3,18 +3,17 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import EditorPanel from './components/EditorPanel';
 import ResultsPanel from './components/ResultsPanel';
-import { StrategyConfig, LogEntry, LogLevel, Metrics, StrategyType, Stock } from './types';
+import { StrategyConfig, LogEntry, LogLevel, Metrics, StrategyType, Stock, Trade } from './types';
 import { 
     INITIAL_PYTHON_CODE, 
     MOCK_LOGS, 
-    MOCK_TRADES, 
     generateChartData, 
     DEFAULT_METRICS, 
     STRATEGY_CODES, 
     STOCK_POOL,
-    generateDeterministicMetrics
+    generateDeterministicMetrics,
+    generateDeterministicTrades
 } from './constants';
-import { analyzeStrategy } from './services/geminiService';
 import { Settings, Code, BarChart2 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -43,14 +42,22 @@ const App: React.FC = () => {
   const [selectedStrategy, setSelectedStrategy] = useState<StrategyType>('DualMA');
   const [code, setCode] = useState<string>(INITIAL_PYTHON_CODE);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [metrics, setMetrics] = useState<Metrics>(DEFAULT_METRICS);
-  const [hasAiBoost, setHasAiBoost] = useState(false);
+  const [trades, setTrades] = useState<Trade[]>([]);
   
   // Mobile Tab State
   const [activeTab, setActiveTab] = useState<'config' | 'editor' | 'results'>('config');
 
-  // Initialize Logs
+  // Helper to refresh simulation data
+  const refreshSimulation = (currentStrategy: StrategyType, currentStock: Stock, currentConfig: StrategyConfig) => {
+      const newMetrics = generateDeterministicMetrics(currentStrategy, currentStock.code, currentConfig);
+      setMetrics(newMetrics);
+      
+      const newTrades = generateDeterministicTrades(currentStrategy, currentStock.code, currentConfig);
+      setTrades(newTrades);
+  };
+
+  // Initialize Logs and Simulation
   useEffect(() => {
     let delay = 0;
     const initialLogs = MOCK_LOGS;
@@ -61,32 +68,14 @@ const App: React.FC = () => {
             setLogs(prev => [...prev, log]);
         }, delay);
     });
-    // Calculate initial metrics for default state
-    setMetrics(generateDeterministicMetrics('DualMA', STOCK_POOL[0].code, config));
-  }, []);
+    // Calculate initial metrics and trades
+    refreshSimulation(selectedStrategy, selectedStock, config);
+  }, []); // Run once on mount
 
-  // --- Helper to calculate metrics with optional AI boost ---
-  const calculateMetrics = (
-      strat: StrategyType, 
-      stkCode: string, 
-      cfg: StrategyConfig, 
-      applyBoost: boolean
-  ) => {
-      const base = generateDeterministicMetrics(strat, stkCode, cfg);
-      if (!applyBoost) return base;
-
-      // Apply AI Boost (+10% Return, -2% Drawdown)
-      const currentReturn = parseFloat(base.totalReturn);
-      const currentDrawdown = parseFloat(base.maxDrawdown);
-      
-      return {
-          ...base,
-          totalReturn: (currentReturn + 10).toFixed(2) + '%',
-          annualReturn: (currentReturn + 10).toFixed(2) + '%',
-          maxDrawdown: Math.max(0, currentDrawdown - 2).toFixed(2) + '%'
-      };
-  };
-
+  // Refresh trades when config changes (debounced slightly via logic flow, but here direct for responsiveness)
+  useEffect(() => {
+      refreshSimulation(selectedStrategy, selectedStock, config);
+  }, [config, selectedStrategy, selectedStock]);
 
   // --- Two-Way Binding Logic ---
 
@@ -206,7 +195,6 @@ const App: React.FC = () => {
   const handleConfigChange = (newConfig: StrategyConfig) => {
     setConfig(newConfig);
     updateCodeFromConfig(newConfig);
-    setHasAiBoost(false);
   };
 
   const handleSaveConfig = () => {
@@ -254,11 +242,6 @@ const App: React.FC = () => {
         }
     }
 
-    setHasAiBoost(false);
-    
-    const newMetrics = calculateMetrics(type, newStock.code, config, false);
-    setMetrics(newMetrics);
-
     setLogs(prev => [...prev, { time: new Date().toLocaleTimeString('en-GB'), level: LogLevel.INFO, message: `[系统] 切换策略模板: ${type}` }]);
   };
 
@@ -267,11 +250,6 @@ const App: React.FC = () => {
       if (selectedStrategy !== 'SmallCap' && stock.code === 'CSI_300') return;
 
       setSelectedStock(stock);
-      setHasAiBoost(false);
-      
-      const newMetrics = calculateMetrics(selectedStrategy, stock.code, config, false);
-      setMetrics(newMetrics);
-      
       setLogs(prev => [...prev, { time: new Date().toLocaleTimeString('en-GB'), level: LogLevel.INFO, message: `[数据] 切换回测标的: ${stock.name} (${stock.code})` }]);
   };
 
@@ -303,31 +281,11 @@ const App: React.FC = () => {
     ]);
     
     setTimeout(() => {
-        setHasAiBoost(false);
-        const result = calculateMetrics(selectedStrategy, selectedStock.code, config, false);
-        setMetrics(result);
+        // Trigger a fresh calculation (although effect handles it, this confirms the 'Run' action visually in logs)
+        refreshSimulation(selectedStrategy, selectedStock, config);
         
         setLogs(prev => [...prev, { time: new Date().toLocaleTimeString('en-GB'), level: LogLevel.SUCCESS, message: '[完成] 回测结束，指标已更新。' }]);
     }, 800);
-  };
-
-  const handleAiAnalyze = async () => {
-    if (isAnalyzing) return;
-    setIsAnalyzing(true);
-    setLogs(prev => [...prev, { time: new Date().toLocaleTimeString('en-GB'), level: LogLevel.INFO, message: '[AI] 正在分析策略代码与参数...' }]);
-
-    const analysis = await analyzeStrategy(code, config);
-    setLogs(prev => [...prev, { time: new Date().toLocaleTimeString('en-GB'), level: LogLevel.SUCCESS, message: '[AI] 分析完成。' }]);
-    
-    const analysisComment = `\n\n"""\n[Gemini AI Analysis]\n${analysis}\n"""`;
-    setCode(prev => prev + analysisComment);
-
-    if (!hasAiBoost) {
-        setHasAiBoost(true);
-        setMetrics(calculateMetrics(selectedStrategy, selectedStock.code, config, true));
-    }
-
-    setIsAnalyzing(false);
   };
 
   return (
@@ -355,16 +313,14 @@ const App: React.FC = () => {
                 onCodeChange={handleCodeChange} 
                 logs={logs}
                 onRun={handleRunBacktest}
-                onAnalyze={handleAiAnalyze}
-                isAnalyzing={isAnalyzing}
               />
           </div>
 
           {/* Results */}
           <div className={`${activeTab === 'results' ? 'block' : 'hidden md:block'} w-full md:w-auto h-full`}>
               <ResultsPanel 
-                chartData={generateChartData(config.initialCapital)}
-                trades={MOCK_TRADES}
+                chartData={generateChartData(config.initialCapital, trades, config.startDate, config.endDate)}
+                trades={trades}
                 metrics={metrics}
               />
           </div>
